@@ -82,7 +82,7 @@ function generateGroundLayer() {
         tile = 25; // dirt
       }
 
-      row.push(tile + 1); // Phaser uses 1-based tile indices
+      row.push(tile);
     }
     data.push(row);
   }
@@ -100,7 +100,7 @@ function generateObjectLayer() {
   }
 
   function set(x, y, tile) {
-    if (x >= 0 && x < MAP_W && y >= 0 && y < MAP_H) data[y][x] = tile + 1;
+    if (x >= 0 && x < MAP_W && y >= 0 && y < MAP_H) data[y][x] = tile;
   }
 
   // === FOREST BORDERS ===
@@ -200,7 +200,7 @@ function generateAboveLayer() {
   }
 
   function set(x, y, tile) {
-    if (x >= 0 && x < MAP_W && y >= 0 && y < MAP_H) data[y][x] = tile + 1;
+    if (x >= 0 && x < MAP_W && y >= 0 && y < MAP_H) data[y][x] = tile;
   }
 
   // Roofs above houses (rendered on top of player)
@@ -274,29 +274,7 @@ class WorldScene extends Phaser.Scene {
     this.player.setOffset(2, 4);
     this.player.setDepth(5);
 
-    // Walk animation frames from dungeon spritesheet
-    // Knight front = 85, side views around 97+
-    // We'll use simple frame swap for walk animation
-    this.anims.create({
-      key: 'walk-down',
-      frames: [{ key: 'dungeon', frame: 85 }, { key: 'dungeon', frame: 97 }],
-      frameRate: 6, repeat: -1,
-    });
-    this.anims.create({
-      key: 'walk-up',
-      frames: [{ key: 'dungeon', frame: 85 }, { key: 'dungeon', frame: 97 }],
-      frameRate: 6, repeat: -1,
-    });
-    this.anims.create({
-      key: 'walk-side',
-      frames: [{ key: 'dungeon', frame: 85 }, { key: 'dungeon', frame: 97 }],
-      frameRate: 6, repeat: -1,
-    });
-    this.anims.create({
-      key: 'idle',
-      frames: [{ key: 'dungeon', frame: 85 }],
-      frameRate: 1,
-    });
+    // No animation — single stable frame (knight = frame 85)
 
     // === COLLISION ===
     objLayer.setCollisionByExclusion([-1]);
@@ -410,11 +388,7 @@ class WorldScene extends Phaser.Scene {
 
     this.player.setVelocity(vx, vy);
 
-    if (vx !== 0 || vy !== 0) {
-      this.player.anims.play('walk-down', true);
-    } else {
-      this.player.anims.play('idle', true);
-    }
+    // No walk animation — just flip for direction
 
     // === NPC MOVEMENT ===
     for (const npc of this.npcs) {
