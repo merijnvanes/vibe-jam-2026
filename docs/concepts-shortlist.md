@@ -66,6 +66,16 @@ Reference: [uncivilised-game](https://github.com/uncivilised-game/uncivilised-ga
 - What's the AI enhancement? (must be more than "NPCs that talk" — should change gameplay dynamics)
 - Cost at scale? (LLM calls per player need to be minimal/cheap)
 
+## Horror / Maze
+
+### The Living Maze (early concept — needs design work)
+- *Vibe:* Dark, atmospheric, Limbo meets Pac-Man. Black maze, dim light, white whispered text. Dread.
+- *Core idea:* A shared maze with limited vision (fog of war). All 16+ players are running from AI hunters. Players can alter the maze — place a block, open a path. But whenever the maze is out of sight of ALL players, it can shift and change. The maze is alive when nobody's watching.
+- *AI layer:* An AI narrator whispers personalized dread to players. "It knows you're here." "Don't turn around." Sometimes lies to flush you out. Tracks play style and tailors the horror.
+- *Scale:* 16+ players in one maze. Fog of war means you feel alone even in a crowd.
+- *Build:* Dark aesthetic = render almost nothing = cheapest possible scene. Grid-based maze, point lights, simple figures.
+- *Open questions:* What's the gameplay loop beyond "run"? What objectives pull players into danger? How does maze-altering avoid griefing? What's the scoring/progression? Needs a clear reason to take risks and a satisfying death→respawn cycle.
+
 ## Strategy / Tactics
 
 ### Feeding Frenzy
