@@ -3,6 +3,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 // ============================================================
 // SIMPLEX NOISE (compact implementation)
@@ -162,8 +163,6 @@ const glowMushroomMat2 = new THREE.MeshStandardMaterial({
   color: 0x8855ff, emissive: 0x6633cc, emissiveIntensity: 0.8, roughness: 0.6, metalness: 0.1,
 });
 const emberMat = new THREE.MeshBasicMaterial({ color: 0xff6622 });
-const playerMat = new THREE.MeshStandardMaterial({ color: 0xccaa77, roughness: 0.7, metalness: 0.2 });
-const cloakMat = new THREE.MeshStandardMaterial({ color: 0x2a1a1a, roughness: 0.9, metalness: 0 });
 
 // ============================================================
 // STARFIELD SKY
@@ -806,63 +805,80 @@ function createGroundFog() {
 // ============================================================
 // PLAYER CHARACTER
 // ============================================================
-const player = { x: 0, z: 0, targetX: 0, targetZ: 0, angle: 0, speed: 6 };
+const WALK_SPEED = 4;
+const RUN_SPEED = 8;
+const player = { x: 0, z: 0, targetX: 0, targetZ: 0, angle: 0, speed: WALK_SPEED };
 const cam = { distance: 12, height: 10, angleOffset: 0, smoothAngle: 0 };
 const keys = {};
 
-function createPlayer() {
-  const group = new THREE.Group();
+let mixer = null;
+const animActions = {};
+let currentAction = null;
+let isInteracting = false;
 
-  // Body
-  const bodyGeo = new THREE.CylinderGeometry(0.18, 0.22, 0.7, 8);
-  const body = new THREE.Mesh(bodyGeo, playerMat);
-  body.position.y = 0.5;
-  body.castShadow = true;
-  group.add(body);
+async function loadPlayer() {
+  const loader = new GLTFLoader();
+  const gltf = await loader.loadAsync('assets/Rogue_Hooded.glb');
+  const model = gltf.scene;
 
-  // Head
-  const headGeo = new THREE.SphereGeometry(0.15, 8, 6);
-  const head = new THREE.Mesh(headGeo, playerMat);
-  head.position.y = 1.0;
-  head.castShadow = true;
-  group.add(head);
+  // Enable shadows on character meshes
+  model.traverse(child => {
+    if (child.isMesh) {
+      child.castShadow = true;
+      child.receiveShadow = false;
+    }
+  });
 
-  // Cloak
-  const cloakGeo = new THREE.ConeGeometry(0.3, 0.8, 8, 1, true);
-  const cloak = new THREE.Mesh(cloakGeo, cloakMat);
-  cloak.position.y = 0.6;
-  cloak.castShadow = true;
-  group.add(cloak);
+  // Set up animation mixer and register all clips
+  mixer = new THREE.AnimationMixer(model);
+  for (const clip of gltf.animations) {
+    animActions[clip.name] = mixer.clipAction(clip);
+  }
 
-  // Torch — held in hand
+  // Start with idle
+  if (animActions['Idle']) {
+    animActions['Idle'].play();
+    currentAction = animActions['Idle'];
+  }
+
+  // Create torch and attach to right hand bone
   const torchGroup = new THREE.Group();
+
   const stickGeo = new THREE.CylinderGeometry(0.02, 0.025, 0.5, 4);
   const stick = new THREE.Mesh(stickGeo, woodMat);
   stick.position.y = 0.25;
   torchGroup.add(stick);
 
-  // Torch flame light
   const torchLight = new THREE.PointLight(0xff8833, 6, 18);
   torchLight.position.y = 0.55;
   torchLight.castShadow = false;
   torchGroup.add(torchLight);
 
-  // Flame glow
   const flameMat = new THREE.MeshBasicMaterial({ color: 0xff6622 });
   const flameGeo = new THREE.SphereGeometry(0.06, 4, 4);
   const flame = new THREE.Mesh(flameGeo, flameMat);
   flame.position.y = 0.55;
   torchGroup.add(flame);
 
-  torchGroup.position.set(0.25, 0.4, 0.1);
-  group.add(torchGroup);
+  // Find right hand bone and attach torch
+  let handBone = null;
+  model.traverse(child => {
+    if (child.isBone && /hand.*r|r.*hand/i.test(child.name)) {
+      handBone = child;
+    }
+  });
 
-  const groundGlow = null;
+  if (handBone) {
+    handBone.add(torchGroup);
+    torchGroup.position.set(0, 0.1, 0);
+  } else {
+    // Fallback: attach to model with offset
+    torchGroup.position.set(0.4, 1.2, 0.15);
+    model.add(torchGroup);
+  }
 
-  group.position.set(0, 0, 0);
-  scene.add(group);
-
-  return { group, torchLight, flame, torchGroup, groundGlow };
+  scene.add(model);
+  return { group: model, torchLight, flame };
 }
 
 // ============================================================
@@ -1186,9 +1202,28 @@ window.addEventListener('click', () => {
     const dz = player.z - orb.mesh.position.z;
     if (Math.sqrt(dx * dx + dz * dz) < 1.5) {
       orb.collected = true;
-      // Animate collection
       orb.collecting = true;
       orb.collectTime = 0;
+
+      // Play interact animation
+      if (animActions['Interact'] && !isInteracting) {
+        isInteracting = true;
+        const interactAction = animActions['Interact'];
+        interactAction.reset();
+        interactAction.setLoop(THREE.LoopOnce, 1);
+        interactAction.clampWhenFinished = false;
+        interactAction.fadeIn(0.2).play();
+        if (currentAction) currentAction.fadeOut(0.2);
+        const onFinished = (e) => {
+          if (e.action === interactAction) {
+            mixer.removeEventListener('finished', onFinished);
+            isInteracting = false;
+            interactAction.fadeOut(0.2);
+            if (currentAction) currentAction.reset().fadeIn(0.2).play();
+          }
+        };
+        mixer.addEventListener('finished', onFinished);
+      }
     }
   }
 });
@@ -1239,18 +1274,19 @@ const halo = new THREE.Mesh(haloGeo, haloMat);
 halo.position.copy(moon.position);
 halo.lookAt(0, 0, 0);
 scene.add(halo);
-playerObj = createPlayer();
 fireflies = createFireflies();
 dustParticles = createDustParticles();
 embers = createEmberParticles();
 fogGroup = createGroundFog();
 footsteps = createFootstepSystem();
 
-// Hide loading screen
-setTimeout(() => {
+// Load player model, then start game
+loadPlayer().then(obj => {
+  playerObj = obj;
   document.getElementById('loading').classList.add('fade');
   setTimeout(() => document.getElementById('loading').style.display = 'none', 1000);
-}, 500);
+  animate();
+});
 
 function animate() {
   requestAnimationFrame(animate);
@@ -1270,6 +1306,9 @@ function animate() {
   }
 
   // ---- Player Movement (3rd person: W/S = forward/back, A/D = turn) ----
+  const isRunning = !!(keys['shift']);
+  player.speed = isRunning ? RUN_SPEED : WALK_SPEED;
+
   const turnSpeed = 3;
   if (keys['a'] || keys['arrowleft']) player.angle += turnSpeed * dt;
   if (keys['d'] || keys['arrowright']) player.angle -= turnSpeed * dt;
@@ -1299,15 +1338,33 @@ function animate() {
     }
   }
 
+  // ---- Animation State Machine ----
+  if (mixer) {
+    if (!isInteracting) {
+      let targetAction = animActions['Idle'];
+      if (isMoving) {
+        if (forward < 0) {
+          targetAction = animActions['Walking_Backwards'] || animActions['Walking_A'];
+        } else if (isRunning) {
+          targetAction = animActions['Running_A'] || animActions['Walking_A'];
+        } else {
+          targetAction = animActions['Walking_A'];
+        }
+      }
+      if (targetAction && targetAction !== currentAction) {
+        const prev = currentAction;
+        currentAction = targetAction;
+        currentAction.reset().fadeIn(0.25).play();
+        if (prev) prev.fadeOut(0.25);
+      }
+    }
+    mixer.update(dt);
+  }
+
   // Update player position
   const groundY = getGroundHeight(player.x, player.z);
   playerObj.group.position.set(player.x, groundY, player.z);
   playerObj.group.rotation.y = player.angle;
-
-  // Player bob
-  if (isMoving) {
-    playerObj.group.position.y += Math.sin(time * 8) * 0.03;
-  }
 
   // Torch flicker
   const torchFlicker = 1 + Math.sin(time * 12) * 0.1 + Math.sin(time * 17) * 0.05 + Math.sin(time * 23) * 0.03;
@@ -1331,7 +1388,7 @@ function animate() {
   camera.position.x = THREE.MathUtils.lerp(camera.position.x, camTargetX, camSmooth);
   camera.position.y = THREE.MathUtils.lerp(camera.position.y, camTargetY, camSmooth);
   camera.position.z = THREE.MathUtils.lerp(camera.position.z, camTargetZ, camSmooth);
-  camera.lookAt(player.x, groundY + 0.8, player.z);
+  camera.lookAt(player.x, groundY + 1.2, player.z);
 
   // ---- Campfire Flicker ----
   for (const fire of campfires) {
@@ -1423,5 +1480,3 @@ function animate() {
   // ---- Render ----
   composer.render();
 }
-
-animate();
