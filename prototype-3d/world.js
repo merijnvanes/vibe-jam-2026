@@ -61,9 +61,9 @@ camera.lookAt(0, 0, 0);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = THREE.PCFShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 3.0;
 document.body.appendChild(renderer.domElement);
@@ -128,7 +128,7 @@ scene.add(ambientLight);
 const moonLight = new THREE.DirectionalLight(0x99aadd, 3.0);
 moonLight.position.set(-10, 20, -5);
 moonLight.castShadow = true;
-moonLight.shadow.mapSize.set(2048, 2048);
+moonLight.shadow.mapSize.set(1024, 1024);
 moonLight.shadow.camera.left = -30;
 moonLight.shadow.camera.right = 30;
 moonLight.shadow.camera.top = 30;
@@ -225,7 +225,7 @@ function createStarfield() {
 // ============================================================
 function createGround() {
   const size = 80;
-  const segments = 200;
+  const segments = 100;
   const geo = new THREE.PlaneGeometry(size, size, segments, segments);
   geo.rotateX(-Math.PI / 2);
 
@@ -438,15 +438,10 @@ function createCampfire(x, z) {
   // Fire light — warm, flickering
   const fireLight = new THREE.PointLight(0xff6622, 5, 15);
   fireLight.position.y = 0.5;
-  fireLight.castShadow = true;
-  fireLight.shadow.mapSize.set(512, 512);
-  fireLight.shadow.bias = -0.005;
+  fireLight.castShadow = false;
   group.add(fireLight);
 
-  // Secondary softer light
-  const glowLight = new THREE.PointLight(0xff4400, 2, 10);
-  glowLight.position.y = 0.3;
-  group.add(glowLight);
+  const glowLight = null;
 
   // Fire visual — stacked glowing planes that animate
   const fireGroup = new THREE.Group();
@@ -476,6 +471,11 @@ function createCampfire(x, z) {
 // ============================================================
 const mushrooms = [];
 
+// Shared mushroom geometry
+const sharedStemGeo = new THREE.CylinderGeometry(0.02, 0.03, 0.15, 5);
+const sharedCapGeo = new THREE.SphereGeometry(0.07, 6, 4, 0, Math.PI * 2, 0, Math.PI * 0.6);
+const sharedStemMat = new THREE.MeshStandardMaterial({ color: 0xccccaa, roughness: 0.9 });
+
 function createGlowingMushroom(x, z, color = 'green') {
   const group = new THREE.Group();
   const gy = getGroundHeight(x, z);
@@ -483,26 +483,17 @@ function createGlowingMushroom(x, z, color = 'green') {
 
   const mat = color === 'green' ? glowMushroomMat : glowMushroomMat2;
 
-  // Stem
-  const stemGeo = new THREE.CylinderGeometry(0.02, 0.03, 0.15, 5);
-  const stem = new THREE.Mesh(stemGeo, new THREE.MeshStandardMaterial({ color: 0xccccaa, roughness: 0.9 }));
+  const stem = new THREE.Mesh(sharedStemGeo, sharedStemMat);
   stem.position.y = 0.075;
   group.add(stem);
 
-  // Cap
-  const capGeo = new THREE.SphereGeometry(0.07, 6, 4, 0, Math.PI * 2, 0, Math.PI * 0.6);
-  const cap = new THREE.Mesh(capGeo, mat);
+  const cap = new THREE.Mesh(sharedCapGeo, mat);
   cap.position.y = 0.15;
   group.add(cap);
 
-  // Glow light
-  const glowColor = color === 'green' ? 0x00ff88 : 0x6633ff;
-  const light = new THREE.PointLight(glowColor, 1.5, 5);
-  light.position.y = 0.2;
-  group.add(light);
-
+  // No individual light — cluster light added in generateWorld
   scene.add(group);
-  mushrooms.push({ group, light, baseIntensity: 1.5, phase: Math.random() * Math.PI * 2 });
+  mushrooms.push({ group, light: null, baseIntensity: 1.5, phase: Math.random() * Math.PI * 2 });
   return group;
 }
 
@@ -517,10 +508,6 @@ function createPond(x, z, radius = 3) {
   pond.receiveShadow = true;
   scene.add(pond);
 
-  // Subtle water glow
-  const waterLight = new THREE.PointLight(0x224466, 0.3, 6);
-  waterLight.position.set(x, getGroundHeight(x, z) + 0.5, z);
-  scene.add(waterLight);
 
   // Reeds around the edge
   for (let i = 0; i < 20; i++) {
@@ -552,7 +539,7 @@ function createGrassField() {
     alphaTest: 0.5,
   });
 
-  const count = 8000;
+  const count = 4000;
   const mesh = new THREE.InstancedMesh(bladeGeo, grassMat, count);
   const dummy = new THREE.Object3D();
   const color = new THREE.Color();
@@ -599,7 +586,7 @@ function createFallenLeaves() {
     color: 0x8a5a2a, roughness: 0.95, metalness: 0, side: THREE.DoubleSide,
   });
 
-  const count = 3000;
+  const count = 1500;
   const mesh = new THREE.InstancedMesh(leafGeo, leafMaterial, count);
   const dummy = new THREE.Object3D();
   const color = new THREE.Color();
@@ -857,9 +844,7 @@ function createPlayer() {
   // Torch flame light
   const torchLight = new THREE.PointLight(0xff8833, 6, 18);
   torchLight.position.y = 0.55;
-  torchLight.castShadow = true;
-  torchLight.shadow.mapSize.set(512, 512);
-  torchLight.shadow.bias = -0.005;
+  torchLight.castShadow = false;
   torchGroup.add(torchLight);
 
   // Flame glow
@@ -872,10 +857,7 @@ function createPlayer() {
   torchGroup.position.set(0.25, 0.4, 0.1);
   group.add(torchGroup);
 
-  // Ground glow beneath player
-  const groundGlow = new THREE.PointLight(0xff6622, 2, 8);
-  groundGlow.position.set(0, 0.1, 0);
-  group.add(groundGlow);
+  const groundGlow = null;
 
   group.position.set(0, 0, 0);
   scene.add(group);
@@ -937,13 +919,9 @@ function createOrb(x, z) {
   const y = getGroundHeight(x, z) + 0.6;
   mesh.position.set(x, y, z);
 
-  const light = new THREE.PointLight(0xffaa00, 0.5, 4);
-  light.position.copy(mesh.position);
-  light.position.y += 0.1;
-  scene.add(light);
   scene.add(mesh);
 
-  orbs.push({ mesh, light, baseY: y, phase: Math.random() * Math.PI * 2, collected: false });
+  orbs.push({ mesh, light: null, baseY: y, phase: Math.random() * Math.PI * 2, collected: false });
 }
 
 // ============================================================
@@ -968,7 +946,7 @@ function generateWorld() {
   createFallenLeaves();
 
   // Trees — scattered with noise-based density
-  for (let i = 0; i < 120; i++) {
+  for (let i = 0; i < 60; i++) {
     const x = (Math.random() - 0.5) * 60;
     const z = (Math.random() - 0.5) * 60;
     const distFromCenter = Math.sqrt(x * x + z * z);
@@ -990,7 +968,7 @@ function generateWorld() {
   createTree(0, 7, 1.1);
 
   // Rocks
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < 30; i++) {
     const x = (Math.random() - 0.5) * 55;
     const z = (Math.random() - 0.5) * 55;
     if (isNearWater(x, z)) continue;
@@ -1043,12 +1021,22 @@ function generateWorld() {
     [-8, -13], [-9, -11],
   ];
 
-  for (const [mx, mz] of mushroomPositions) {
-    const clusterSize = 2 + Math.floor(Math.random() * 4);
+  for (let ci = 0; ci < mushroomPositions.length; ci++) {
+    const [mx, mz] = mushroomPositions[ci];
+    const clusterSize = 2 + Math.floor(Math.random() * 3);
+    const color = Math.random() > 0.5 ? 'green' : 'purple';
     for (let i = 0; i < clusterSize; i++) {
       const ox = mx + (Math.random() - 0.5) * 1.5;
       const oz = mz + (Math.random() - 0.5) * 1.5;
-      createGlowingMushroom(ox, oz, Math.random() > 0.5 ? 'green' : 'purple');
+      createGlowingMushroom(ox, oz, color);
+    }
+    // One light per every other cluster — emissive materials handle the rest
+    if (ci % 2 === 0) {
+      const glowColor = color === 'green' ? 0x00ff88 : 0x6633ff;
+      const clusterLight = new THREE.PointLight(glowColor, 2.0, 6);
+      clusterLight.position.set(mx, getGroundHeight(mx, mz) + 0.2, mz);
+      scene.add(clusterLight);
+      mushrooms.push({ group: null, light: clusterLight, baseIntensity: 2.0, phase: Math.random() * Math.PI * 2 });
     }
   }
 
@@ -1351,7 +1339,6 @@ function animate() {
       Math.sin(time * 15.7 + fire.group.position.z) * 0.1 +
       Math.sin(time * 23.3) * 0.05;
     fire.fireLight.intensity = fire.baseIntensity * flicker;
-    fire.glowLight.intensity = flicker * 0.8;
 
     // Animate fire planes
     if (fire.fireGroup) {
@@ -1367,6 +1354,7 @@ function animate() {
 
   // ---- Mushroom Glow Pulse ----
   for (const m of mushrooms) {
+    if (!m.light) continue;
     const pulse = 0.7 + Math.sin(time * 1.5 + m.phase) * 0.3;
     m.light.intensity = m.baseIntensity * pulse;
   }
@@ -1411,12 +1399,10 @@ function animate() {
       orb.collectTime += dt * 3;
       orb.mesh.scale.setScalar(Math.max(0, 1 - orb.collectTime));
       orb.mesh.position.y = orb.baseY + orb.collectTime * 2;
-      orb.light.intensity = Math.max(0, 0.5 * (1 - orb.collectTime));
       orb.mesh.rotation.y += dt * 10;
       if (orb.collectTime >= 1) {
         orb.collecting = false;
         scene.remove(orb.mesh);
-        scene.remove(orb.light);
         orbsCollected++;
         document.getElementById('ui').textContent = `${orbsCollected} ancient relics collected`;
       }
@@ -1425,8 +1411,6 @@ function animate() {
     if (!orb.collected) {
       orb.mesh.position.y = orb.baseY + Math.sin(time * 2 + orb.phase) * 0.15;
       orb.mesh.rotation.y += dt * 1.5;
-      orb.light.position.y = orb.mesh.position.y + 0.1;
-      orb.light.intensity = 0.3 + Math.sin(time * 3 + orb.phase) * 0.2;
     }
   }
 
