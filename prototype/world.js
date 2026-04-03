@@ -820,6 +820,7 @@ function createGroundFog() {
 // PLAYER CHARACTER
 // ============================================================
 const player = { x: 0, z: 0, targetX: 0, targetZ: 0, angle: 0, speed: 6 };
+const cam = { distance: 12, height: 10, angleOffset: 0, smoothAngle: 0 };
 const keys = {};
 
 function createPlayer() {
@@ -1268,17 +1269,35 @@ function animate() {
   const dt = Math.min(clock.getDelta(), 0.05);
   const time = clock.getElapsedTime();
 
-  // ---- Player Movement ----
-  let moveX = 0, moveZ = 0;
-  if (keys['w'] || keys['arrowup']) moveZ -= 1;
-  if (keys['s'] || keys['arrowdown']) moveZ += 1;
-  if (keys['a'] || keys['arrowleft']) moveX -= 1;
-  if (keys['d'] || keys['arrowright']) moveX += 1;
+  // ---- Read camera sliders ----
+  const heightSlider = document.getElementById('camHeight');
+  const distSlider = document.getElementById('camDist');
+  if (heightSlider) {
+    cam.height = parseFloat(heightSlider.value);
+    document.getElementById('camHeightVal').textContent = cam.height;
+  }
+  if (distSlider) {
+    cam.distance = parseFloat(distSlider.value);
+    document.getElementById('camDistVal').textContent = cam.distance;
+  }
 
-  const isMoving = moveX !== 0 || moveZ !== 0;
+  // ---- Player Movement (camera-relative) ----
+  let inputX = 0, inputZ = 0;
+  if (keys['w'] || keys['arrowup']) inputZ -= 1;
+  if (keys['s'] || keys['arrowdown']) inputZ += 1;
+  if (keys['a'] || keys['arrowleft']) inputX -= 1;
+  if (keys['d'] || keys['arrowright']) inputX += 1;
+
+  const isMoving = inputX !== 0 || inputZ !== 0;
   if (isMoving) {
-    const len = Math.sqrt(moveX * moveX + moveZ * moveZ);
-    moveX /= len; moveZ /= len;
+    const len = Math.sqrt(inputX * inputX + inputZ * inputZ);
+    inputX /= len; inputZ /= len;
+
+    // Rotate movement direction by camera's current angle so WASD is camera-relative
+    const cosA = Math.cos(cam.smoothAngle);
+    const sinA = Math.sin(cam.smoothAngle);
+    const moveX = inputX * cosA + inputZ * sinA;
+    const moveZ = -inputX * sinA + inputZ * cosA;
 
     player.x += moveX * player.speed * dt;
     player.z += moveZ * player.speed * dt;
@@ -1288,7 +1307,7 @@ function animate() {
     player.z = THREE.MathUtils.clamp(player.z, -35, 35);
 
     // Face direction of movement
-    player.angle = Math.atan2(moveX, -moveZ);
+    player.angle = Math.atan2(moveX, moveZ);
 
     // Footstep particles
     footstepTimer += dt;
@@ -1305,7 +1324,7 @@ function animate() {
   playerObj.group.rotation.y = THREE.MathUtils.lerp(
     playerObj.group.rotation.y,
     player.angle,
-    1 - Math.pow(0.001, dt)
+    1 - Math.pow(0.0001, dt)
   );
 
   // Player bob
@@ -1318,15 +1337,23 @@ function animate() {
   playerObj.torchLight.intensity = 4 * torchFlicker;
   playerObj.flame.scale.setScalar(0.8 + Math.sin(time * 15) * 0.3);
 
-  // ---- Camera Follow ----
-  const camTargetX = player.x;
-  const camTargetZ = player.z + 10;
-  const camTargetY = 14;
+  // ---- 3rd Person Camera (orbits behind player) ----
+  // Smoothly follow the player's facing angle
+  cam.smoothAngle = THREE.MathUtils.lerp(
+    cam.smoothAngle,
+    player.angle,
+    1 - Math.pow(0.005, dt)
+  );
 
-  camera.position.x = THREE.MathUtils.lerp(camera.position.x, camTargetX, 1 - Math.pow(0.01, dt));
-  camera.position.y = THREE.MathUtils.lerp(camera.position.y, camTargetY, 1 - Math.pow(0.01, dt));
-  camera.position.z = THREE.MathUtils.lerp(camera.position.z, camTargetZ, 1 - Math.pow(0.01, dt));
-  camera.lookAt(player.x, groundY, player.z);
+  // Camera position: behind the player based on their facing direction
+  const camTargetX = player.x - Math.sin(cam.smoothAngle) * cam.distance;
+  const camTargetZ = player.z - Math.cos(cam.smoothAngle) * cam.distance;
+  const camTargetY = groundY + cam.height;
+
+  camera.position.x = THREE.MathUtils.lerp(camera.position.x, camTargetX, 1 - Math.pow(0.005, dt));
+  camera.position.y = THREE.MathUtils.lerp(camera.position.y, camTargetY, 1 - Math.pow(0.005, dt));
+  camera.position.z = THREE.MathUtils.lerp(camera.position.z, camTargetZ, 1 - Math.pow(0.005, dt));
+  camera.lookAt(player.x, groundY + 0.8, player.z);
 
   // ---- Campfire Flicker ----
   for (const fire of campfires) {
