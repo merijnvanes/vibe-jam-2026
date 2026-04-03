@@ -328,8 +328,8 @@ class SanctuaryScene extends Phaser.Scene {
     this.load.image("oak-b", "assets/trees/oak-b.png");
     this.load.spritesheet("grass-tiles", "assets/terrain/grass_tiles.png", { frameWidth: 128, frameHeight: 64 });
     this.load.spritesheet("sand-tiles", "assets/terrain/sand_tiles.png", { frameWidth: 128, frameHeight: 64 });
-    this.load.spritesheet("warrior-walk", "assets/characters/warrior-walk.png", { frameWidth: 128, frameHeight: 160 });
-    this.load.spritesheet("warrior-idle", "assets/characters/warrior-idle.png", { frameWidth: 128, frameHeight: 160 });
+    this.load.spritesheet("crusader-walk", "assets/characters/crusader-walk.png", { frameWidth: 299, frameHeight: 240 });
+    this.load.spritesheet("crusader-idle", "assets/characters/crusader-idle.png", { frameWidth: 299, frameHeight: 240 });
     for (const key of PLANT_VARIANTS) this.load.image(key, `assets/plants/${key}.png`);
     this.load.image("ruin-ring", "assets/ruins/ritual-ring.png");
     this.load.image("ruin-arch", "assets/ruins/arch-large.png");
@@ -356,23 +356,27 @@ class SanctuaryScene extends Phaser.Scene {
 
   createAnimations() {
     const dirs = [
-      { key: "sw", row: 0 },
+      { key: "s", row: 0 },
       { key: "se", row: 1 },
-      { key: "nw", row: 2 },
+      { key: "e", row: 2 },
       { key: "ne", row: 3 },
+      { key: "n", row: 4 },
+      { key: "nw", row: 5 },
+      { key: "w", row: 6 },
+      { key: "sw", row: 7 },
     ];
 
     for (const dir of dirs) {
       this.anims.create({
-        key: `warrior-walk-${dir.key}`,
-        frames: this.anims.generateFrameNumbers("warrior-walk", { start: dir.row * 4, end: dir.row * 4 + 3 }),
-        frameRate: 8,
+        key: `crusader-walk-${dir.key}`,
+        frames: this.anims.generateFrameNumbers("crusader-walk", { start: dir.row * 15, end: dir.row * 15 + 14 }),
+        frameRate: 18,
         repeat: -1,
       });
       this.anims.create({
-        key: `warrior-idle-${dir.key}`,
-        frames: this.anims.generateFrameNumbers("warrior-idle", { start: dir.row * 4, end: dir.row * 4 + 3 }),
-        frameRate: 4,
+        key: `crusader-idle-${dir.key}`,
+        frames: this.anims.generateFrameNumbers("crusader-idle", { start: dir.row * 16, end: dir.row * 16 + 15 }),
+        frameRate: 10,
         repeat: -1,
       });
     }
@@ -597,9 +601,9 @@ class SanctuaryScene extends Phaser.Scene {
     this.playerDirection = "sw";
     this.playerGlow = this.add.circle(0, -18, 26, 0xffbf73, 0.14).setBlendMode(Phaser.BlendModes.ADD);
     this.playerShadow = this.add.image(0, 8, "shadow").setScale(0.72).setAlpha(0.52);
-    this.playerSprite = this.add.sprite(0, 4, "warrior-idle", 4).setOrigin(0.5, 1);
-    this.playerSprite.setScale(0.5);
-    this.playerSprite.play("warrior-idle-sw");
+    this.playerSprite = this.add.sprite(0, 10, "crusader-idle", 0).setOrigin(0.5, 0.92);
+    this.playerSprite.setScale(0.32);
+    this.playerSprite.play("crusader-idle-sw");
     this.playerRoot.add([this.playerGlow, this.playerShadow, this.playerSprite]);
     this.playerRoot.setDepth(spawn.y + 200);
   }
@@ -752,15 +756,15 @@ class SanctuaryScene extends Phaser.Scene {
   }
 
   getDirectionForVelocity(worldVX, worldVY) {
-    if (worldVY >= 0 && worldVX >= 0) return "se";
-    if (worldVY >= 0 && worldVX < 0) return "sw";
-    if (worldVY < 0 && worldVX >= 0) return "ne";
-    return "nw";
+    const angle = Math.atan2(worldVY, worldVX);
+    const sector = Math.round(angle / (Math.PI / 4));
+    const dirs = ["e", "se", "s", "sw", "w", "nw", "n", "ne"];
+    return dirs[((sector % 8) + 8) % 8];
   }
 
   setPlayerAnimation(direction, moving) {
     this.playerDirection = direction || this.playerDirection;
-    const key = `warrior-${moving ? "walk" : "idle"}-${this.playerDirection}`;
+    const key = `crusader-${moving ? "walk" : "idle"}-${this.playerDirection}`;
     if (this.playerSprite.anims.currentAnim?.key !== key) {
       this.playerSprite.play(key, true);
     }

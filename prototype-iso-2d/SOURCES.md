@@ -6,11 +6,11 @@
   License: CC-BY 4.0 / CC-BY-SA 4.0 / GPL 2.0 / GPL 3.0
   Used for: higher-detail base grass and path overlays
 
-- `assets/characters/warrior-walk.png`, `assets/characters/warrior-idle.png`
-  Source: OpenGameArt, "Warrior animated character isometric" by Jana Ochse / 2D!PIXX
-  URL: https://opengameart.org/content/warrior-animated-character-isometric
-  License: CC-BY 4.0
-  Used for: four-direction animated player idle and walk cycles
+- `assets/characters/crusader-walk.png`, `assets/characters/crusader-idle.png`
+  Source: OpenGameArt, "Isometric Mini-Crusader" by Bleed
+  URL: https://opengameart.org/content/isometric-mini-crusader
+  License: custom freeware license, credit required to `Bleed - http://remusprites.carbonmade.com/`
+  Used for: eight-direction animated player idle and walk cycles
 
 - `assets/plants/bamboo-00.png`, `assets/plants/bamboo-03.png`, `assets/plants/bamboo-09.png`, `assets/plants/exotic-00.png`, `assets/plants/exotic-03.png`, `assets/plants/exotic-08.png`
   Source: OpenGameArt, "Isometric plant pack" by rubberduck
