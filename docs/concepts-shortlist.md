@@ -25,6 +25,41 @@ Concepts we like, collected across brainstorm rounds. No final pick yet.
 - *Build:* Flat plane + color grid. Zero models.
 - *Why:* End-of-round freeze frame is a natural screenshot. Time-lapse is inherently shareable.
 
+## Vehicular / Arena
+
+### Demolition Derby (FlatOut 2-inspired)
+- *Vibe:* Gritty, crunchy, adrenaline. Think 80s/90s stock car aesthetic — rust, sparks, dust clouds, metal-on-metal soundtrack. Or go stylized/neon for a more unique look.
+- *Mechanic:* Cars in a closed arena ramming each other. Continuous play — no fixed rounds. Points for survival time + each car you wreck. Destroyed = quick respawn, keep playing. Arcade physics — drifty, weighty, not sim.
+- *Scale:* 16+ cars in one arena. More players = more chaos, more collisions, more multi-car pile-ups. Every direction is a threat.
+- *Build:* One arena (walled circle/rectangle), low-poly cars (one model, color variations). Damage as visual states (intact → dented → smoking → wrecked) rather than real-time deformation. Sparks and debris are particle effects.
+- *Why:* Instantly familiar — everyone knows demolition derby. The continuous respawn + scoring model fits the vision perfectly (no idle, no waiting). Impact feel is the whole game.
+- *Risks:*
+  - **Multiplayer physics sync** is the hardest part. 16+ fast-moving cars with constant collisions need either server-authoritative physics (costly) or smart client-side prediction. Desync on collisions is the main failure mode.
+  - **Car feel** — the difference between "fun" and "floaty" is tuning work. Sound design, screen shake, collision particles, and weight are what make it crunchy.
+- *De-risk ideas:*
+  - Each client owns their car physics, server validates kills/damage only (cheaper, lighter)
+  - Keep arena small to force action — no driving around looking for fights
+  - Stylized/low-poly aesthetic avoids needing detailed car models or deformation
+  - Prioritize sound + screen shake over visual damage for impact feel
+
+## AI-Enhanced (proven game + AI twist)
+
+A direction rather than a single concept: take a game formula that already works and enhance it with AI in a way that wasn't previously possible. Not AI gimmicks — AI that genuinely changes the experience.
+
+Reference: [uncivilised-game](https://github.com/uncivilised-game/uncivilised-game-base) — a Civ-like where LLM-powered faction leaders negotiate, betray, and dynamically inject new game content (units, tech, resources) through diplomatic conversation. Every playthrough evolves differently based on what you negotiate. The AI doesn't replace gameplay — it adds an emergent layer on top of proven mechanics.
+
+**What makes this angle strong:**
+- The base game is proven fun — you're not gambling on an untested mechanic
+- AI adds surprise and replayability — each session feels unique
+- Cheap LLM text is the only runtime AI needed (fits budget constraints)
+- Judges will recognize the base game instantly, then be surprised by what the AI adds
+- Shows what 2026 AI can do vs 2025 — fits the "benchmark for AI coding" narrative levelsio mentioned
+
+**Open questions:**
+- Which proven game formula? (needs to be simple enough to build in a month, multiplayer, browser-friendly)
+- What's the AI enhancement? (must be more than "NPCs that talk" — should change gameplay dynamics)
+- Cost at scale? (LLM calls per player need to be minimal/cheap)
+
 ## Strategy / Tactics
 
 ### Feeding Frenzy
