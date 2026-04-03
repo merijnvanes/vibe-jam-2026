@@ -1,1 +1,11 @@
 .playwright-mcp/
+.DS_Store
+*.zip
+autotile-*.png
+map-seed-*.png
+prototype-2d-screenshot.png
+prototype-2d/map_preview*.png
+prototype-2d/tiles_detail.png
+prototype-2d/autotiles/godot4/
+prototype-2d/autotiles/*.aseprite
+prototype-2d/autotiles/*.zip
