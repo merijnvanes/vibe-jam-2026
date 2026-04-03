@@ -16,6 +16,13 @@ We're not just making a game. We're creating a **vibe** — a world that pulls y
 - **Narration** — possibly; if it serves the vibe, not as filler
 - **AI NPCs** — characters that feel alive and belong in the world
 
+## Multiplayer Design
+
+- **One shared space** — no split rooms or instances. All players together, 16+.
+- **Drop-in/drop-out** — joining or leaving mid-game doesn't disrupt others. No waiting lobbies.
+- **Always playing** — prefer continuous gameplay over rounds. If rounds are necessary, keep them under 30 seconds so new joiners never wait long — and let them spectate live while they wait.
+- **No dead ends** — if a player fails, dies, or completes something, they stay in the game. Quick respawn, new objective, or a score-based loop. The player is never sitting idle.
+
 ## Theme Direction
 
 The theme should tap into something **familiar** — something people already have feelings about. Relatability, cultural relevance, or nostalgia. When a player recognises the world, they're already halfway immersed before gameplay even starts.
