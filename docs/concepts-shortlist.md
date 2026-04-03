@@ -41,6 +41,12 @@ Concepts we like, collected across brainstorm rounds. No final pick yet.
   - Keep arena small to force action — no driving around looking for fights
   - Stylized/low-poly aesthetic avoids needing detailed car models or deformation
   - Prioritize sound + screen shake over visual damage for impact feel
+- *AI layer — Live Announcer/Commentator:*
+  - A shared AI announcer watches the game state and delivers real-time sports-style commentary to all players simultaneously. One LLM call serves 16+ players.
+  - Calls out rivalries ("Player3 has hit Player7 THREE times — this is personal"), names emerging plays ("TEXTBOOK SANDWICH — two cars, one victim"), roasts the bottom, hypes the top.
+  - Doubles as game master — can trigger dynamic events ("I'm bored. Shrinking the arena in 10 seconds."), oil slicks, ramps, hazards based on game state.
+  - Cost: ~1 call per 5-10 seconds, broadcast to all. Scales with match, not player count. Very cheap.
+  - Why it works: the difference between watching a sport on mute vs with a commentator. Players will screenshot the commentary. Creates narrative, rivalries, and moments from pure chaos.
 
 ## AI-Enhanced (proven game + AI twist)
 
