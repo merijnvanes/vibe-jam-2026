@@ -27,4 +27,9 @@ Concepts we like, collected across brainstorm rounds. No final pick yet.
 
 ## Strategy / Tactics
 
-*(to explore)*
+### Feeding Frenzy
+- *Vibe:* Deep ocean, bioluminescent. BBC Planet Earth deep sea episode.
+- *Mechanic:* Eat smaller things to grow. Bigger = slower + brighter + attracts an AI predator that hunts the biggest player. Being #1 is the most dangerous position.
+- *Scale:* Self-balancing. Mid-size players gang up to corner big ones. Leaderboard constantly shifts.
+- *Build:* Dark background, glowing circles, particle trails. Zero textures.
+- *Why:* The self-correcting predator mechanic solves the biggest .io problem (runaway winners).
