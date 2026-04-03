@@ -42,7 +42,7 @@ function loadImage(name, src) {
 // Tile positions in the packed tilemap (col, row) — 1px spacing, 16px tiles
 // Position formula: x = col * 17, y = row * 17
 function tilePos(col, row) {
-  return { x: col * 17, y: row * 17, w: TILE, h: TILE };
+  return { x: col * TILE, y: row * TILE, w: TILE, h: TILE };
 }
 
 // ============================================================
