@@ -1281,33 +1281,26 @@ function animate() {
     document.getElementById('camDistVal').textContent = cam.distance;
   }
 
-  // ---- Player Movement (camera-relative) ----
-  let inputX = 0, inputZ = 0;
-  if (keys['w'] || keys['arrowup']) inputZ -= 1;
-  if (keys['s'] || keys['arrowdown']) inputZ += 1;
-  if (keys['a'] || keys['arrowleft']) inputX -= 1;
-  if (keys['d'] || keys['arrowright']) inputX += 1;
+  // ---- Player Movement (3rd person: W/S = forward/back, A/D = turn) ----
+  const turnSpeed = 3;
+  if (keys['a'] || keys['arrowleft']) player.angle += turnSpeed * dt;
+  if (keys['d'] || keys['arrowright']) player.angle -= turnSpeed * dt;
 
-  const isMoving = inputX !== 0 || inputZ !== 0;
+  let forward = 0;
+  if (keys['w'] || keys['arrowup']) forward = 1;
+  if (keys['s'] || keys['arrowdown']) forward = -1;
+
+  const isMoving = forward !== 0;
   if (isMoving) {
-    const len = Math.sqrt(inputX * inputX + inputZ * inputZ);
-    inputX /= len; inputZ /= len;
+    const moveX = Math.sin(player.angle) * forward * player.speed * dt;
+    const moveZ = Math.cos(player.angle) * forward * player.speed * dt;
 
-    // Rotate movement direction by camera's current angle so WASD is camera-relative
-    const cosA = Math.cos(cam.smoothAngle);
-    const sinA = Math.sin(cam.smoothAngle);
-    const moveX = inputX * cosA + inputZ * sinA;
-    const moveZ = -inputX * sinA + inputZ * cosA;
-
-    player.x += moveX * player.speed * dt;
-    player.z += moveZ * player.speed * dt;
+    player.x += moveX;
+    player.z += moveZ;
 
     // Clamp to world bounds
     player.x = THREE.MathUtils.clamp(player.x, -35, 35);
     player.z = THREE.MathUtils.clamp(player.z, -35, 35);
-
-    // Face direction of movement
-    player.angle = Math.atan2(moveX, moveZ);
 
     // Footstep particles
     footstepTimer += dt;
@@ -1321,11 +1314,7 @@ function animate() {
   // Update player position
   const groundY = getGroundHeight(player.x, player.z);
   playerObj.group.position.set(player.x, groundY, player.z);
-  playerObj.group.rotation.y = THREE.MathUtils.lerp(
-    playerObj.group.rotation.y,
-    player.angle,
-    1 - Math.pow(0.0001, dt)
-  );
+  playerObj.group.rotation.y = player.angle;
 
   // Player bob
   if (isMoving) {
@@ -1338,21 +1327,22 @@ function animate() {
   playerObj.flame.scale.setScalar(0.8 + Math.sin(time * 15) * 0.3);
 
   // ---- 3rd Person Camera (orbits behind player) ----
-  // Smoothly follow the player's facing angle
-  cam.smoothAngle = THREE.MathUtils.lerp(
-    cam.smoothAngle,
-    player.angle,
-    1 - Math.pow(0.005, dt)
-  );
+  // Smoothly follow the player's facing angle using shortest-path rotation
+  let angleDiff = player.angle - cam.smoothAngle;
+  // Normalize to [-PI, PI] for shortest rotation path
+  while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+  while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+  cam.smoothAngle += angleDiff * (1 - Math.pow(0.02, dt));
 
   // Camera position: behind the player based on their facing direction
   const camTargetX = player.x - Math.sin(cam.smoothAngle) * cam.distance;
   const camTargetZ = player.z - Math.cos(cam.smoothAngle) * cam.distance;
   const camTargetY = groundY + cam.height;
 
-  camera.position.x = THREE.MathUtils.lerp(camera.position.x, camTargetX, 1 - Math.pow(0.005, dt));
-  camera.position.y = THREE.MathUtils.lerp(camera.position.y, camTargetY, 1 - Math.pow(0.005, dt));
-  camera.position.z = THREE.MathUtils.lerp(camera.position.z, camTargetZ, 1 - Math.pow(0.005, dt));
+  const camSmooth = 1 - Math.pow(0.01, dt);
+  camera.position.x = THREE.MathUtils.lerp(camera.position.x, camTargetX, camSmooth);
+  camera.position.y = THREE.MathUtils.lerp(camera.position.y, camTargetY, camSmooth);
+  camera.position.z = THREE.MathUtils.lerp(camera.position.z, camTargetZ, camSmooth);
   camera.lookAt(player.x, groundY + 0.8, player.z);
 
   // ---- Campfire Flicker ----
