@@ -237,5 +237,55 @@ function generateMap(width,height,seed){
     if(sx>=0&&sx<W&&sy>=0&&sy<H&&terrain[sy][sx]===1){spawnX=sx;spawnY=sy;}
   }
 
-  return {width,height,layers,terrain,spawnX,spawnY};
+  const objects=placeObjects(terrain,W,H,seed,spawnX,spawnY);
+  return {width,height,layers,terrain,spawnX,spawnY,objects};
+}
+
+// --- STEP 5: Place decorations (all objects are 1x1 standalone sprites) ---
+function placeObjects(terrain,W,H,seed,spawnX,spawnY){
+  const rng=mulberry32(seed+999);
+  const objects=[];
+  const used=Array.from({length:H},()=>new Uint8Array(W));
+  // Mark spawn area as used
+  for(let dy=-3;dy<=3;dy++) for(let dx=-3;dx<=3;dx++){
+    const ny=spawnY+dy,nx=spawnX+dx;
+    if(ny>=0&&ny<H&&nx>=0&&nx<W) used[ny][nx]=1;
+  }
+
+  // Trees: on grass, with 4-tile spacing (sprites are ~50px = 3 tiles wide)
+  for(let y=3;y<H-3;y++) for(let x=3;x<W-3;x++){
+    if(rng()>0.025) continue;
+    if(terrain[y][x]!==0||used[y][x]) continue;
+    let ok=true;
+    for(let dy=-4;dy<=4&&ok;dy++) for(let dx=-4;dx<=4&&ok;dx++){
+      const ny=y+dy,nx=x+dx;
+      if(ny>=0&&ny<H&&nx>=0&&nx<W&&used[ny][nx]) ok=false;
+    }
+    if(!ok) continue;
+    objects.push({type:'tree',x,y,variant:(rng()*3)|0});
+    for(let dy=-3;dy<=3;dy++) for(let dx=-3;dx<=3;dx++){
+      const ny=y+dy,nx=x+dx;
+      if(ny>=0&&ny<H&&nx>=0&&nx<W) used[ny][nx]=1;
+    }
+  }
+
+  // Stones: very sparse, on grass or sand
+  for(let y=2;y<H-2;y++) for(let x=2;x<W-2;x++){
+    if(rng()>0.005) continue;
+    if((terrain[y][x]!==0&&terrain[y][x]!==2)||used[y][x]) continue;
+    objects.push({type:'rock',x,y,variant:(rng()*3)|0});
+    for(let dy=-2;dy<=2;dy++) for(let dx=-2;dx<=2;dx++){
+      const ny=y+dy,nx=x+dx;
+      if(ny>=0&&ny<H&&nx>=0&&nx<W) used[ny][nx]=1;
+    }
+  }
+
+  // Small decorations: bushes, grass tufts on grass
+  for(let y=0;y<H;y++) for(let x=0;x<W;x++){
+    if(rng()>0.015) continue;
+    if(terrain[y][x]!==0||used[y][x]) continue;
+    objects.push({type:'flower',x,y,variant:(rng()*2)|0});
+  }
+
+  return objects;
 }
