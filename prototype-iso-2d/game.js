@@ -8,6 +8,16 @@ const WORLD_OFFSET_Y = 160;
 const WORLD_W = (MAP_W + MAP_H) * TILE_W * 0.5 + 440;
 const WORLD_H = (MAP_W + MAP_H) * TILE_H * 0.5 + 360;
 const SHORE = 0.31;
+const GRASS_FRAMES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39];
+const SAND_FRAMES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 34];
+const PLANT_VARIANTS = ["bamboo-00", "bamboo-03", "bamboo-09", "exotic-00", "exotic-03", "exotic-08"];
+const RUIN_LAYOUT = [
+  { type: "ruin-ring", x: 40.7, y: 25.8, scale: 0.24 },
+  { type: "ruin-wall-east", x: 37.1, y: 26.7, scale: 0.2 },
+  { type: "ruin-wall-south", x: 43.5, y: 27.4, scale: 0.2 },
+  { type: "ruin-arch", x: 41.2, y: 29.2, scale: 0.2 },
+  { type: "ruin-bridge", x: 24.3, y: 39.8, scale: 0.17 },
+];
 
 function mulberry32(seed) {
   let t = seed >>> 0;
@@ -257,25 +267,28 @@ function buildWorld(seed) {
       const orchard = Math.hypot(x - 45, y - 24) < 8;
       const whisper = Math.hypot(x - 23, y - 42) < 8;
       const lush = meadow[y][x] > 0.57;
+      const sanctum = Math.hypot(x - 41, y - 28) < 8.5;
 
-      if (land[y][x] && !blocked.has(`${x},${y}`) && !nearPath && (lush || orchard || whisper) && rng() > (orchard ? 0.15 : 0.42)) {
+      if (land[y][x] && !blocked.has(`${x},${y}`) && !sanctum && !nearPath && (lush || orchard || whisper) && rng() > (orchard ? 0.15 : 0.42)) {
         addProp("tree", x + rng() * 0.55 - 0.28, y + rng() * 0.55 - 0.28, {
           variant: rng() > 0.5 ? "oak-a" : "oak-b",
           scale: orchard ? 0.2 + rng() * 0.03 : 0.16 + rng() * 0.05,
         });
         mark(x, y, 1);
-      } else if (land[y][x] && lush && rng() > 0.83) {
-        addProp("flower", x + rng() * 0.8 - 0.4, y + rng() * 0.8 - 0.4, {
-          tint: whisper ? 0xb8d5ff : 0xffd48a,
-          scale: 0.75 + rng() * 0.55,
+      } else if (land[y][x] && (lush || sanctum) && rng() > 0.77) {
+        addProp("plant", x + rng() * 0.8 - 0.4, y + rng() * 0.8 - 0.4, {
+          variant: pick(PLANT_VARIANTS, Math.floor(rng() * PLANT_VARIANTS.length)),
+          scale: sanctum ? 0.5 + rng() * 0.16 : whisper ? 0.56 + rng() * 0.1 : 0.42 + rng() * 0.18,
+          alpha: sanctum || whisper ? 0.94 : 0.88,
         });
       }
 
       const coast = !land[y - 1][x] || !land[y + 1][x] || !land[y][x - 1] || !land[y][x + 1];
       if (coast && land[y][x] && rng() > 0.84) {
-        addProp("reed", x + rng() * 0.6 - 0.3, y + rng() * 0.6 - 0.3, {
-          scale: 0.75 + rng() * 0.7,
-          tint: rng() > 0.45 ? 0x7fa66f : 0x9db982,
+        addProp("plant", x + rng() * 0.6 - 0.3, y + rng() * 0.6 - 0.3, {
+          variant: rng() > 0.4 ? "bamboo-09" : "exotic-08",
+          scale: 0.46 + rng() * 0.14,
+          alpha: 0.9,
         });
       }
     }
@@ -290,13 +303,16 @@ function buildWorld(seed) {
   for (const [x, y] of [[22, 43], [24, 44], [26, 43], [26, 41], [24, 40], [22, 41]]) {
     addProp("stone", x, y, { tall: false, glow: true });
   }
+  for (const ruin of RUIN_LAYOUT) {
+    addProp(ruin.type, ruin.x, ruin.y, { scale: ruin.scale });
+  }
 
   return {
     height,
     land,
     path,
     props,
-    spawn: { x: 31, y: 37 },
+    spawn: { x: 40, y: 30 },
   };
 }
 
@@ -310,11 +326,22 @@ class SanctuaryScene extends Phaser.Scene {
   preload() {
     this.load.image("oak-a", "assets/trees/oak-a.png");
     this.load.image("oak-b", "assets/trees/oak-b.png");
+    this.load.spritesheet("grass-tiles", "assets/terrain/grass_tiles.png", { frameWidth: 128, frameHeight: 64 });
+    this.load.spritesheet("sand-tiles", "assets/terrain/sand_tiles.png", { frameWidth: 128, frameHeight: 64 });
+    this.load.spritesheet("warrior-walk", "assets/characters/warrior-walk.png", { frameWidth: 128, frameHeight: 160 });
+    this.load.spritesheet("warrior-idle", "assets/characters/warrior-idle.png", { frameWidth: 128, frameHeight: 160 });
+    for (const key of PLANT_VARIANTS) this.load.image(key, `assets/plants/${key}.png`);
+    this.load.image("ruin-ring", "assets/ruins/ritual-ring.png");
+    this.load.image("ruin-arch", "assets/ruins/arch-large.png");
+    this.load.image("ruin-wall-east", "assets/ruins/wall-east.png");
+    this.load.image("ruin-wall-south", "assets/ruins/wall-south.png");
+    this.load.image("ruin-bridge", "assets/ruins/bridge-broken.png");
   }
 
   create() {
     this.world = buildWorld(20260403);
     this.createGeneratedTextures();
+    this.createAnimations();
     this.addSky();
     this.buildGround();
     this.buildDebugGrid();
@@ -327,6 +354,30 @@ class SanctuaryScene extends Phaser.Scene {
     this.events.on("update", this.updateScene, this);
   }
 
+  createAnimations() {
+    const dirs = [
+      { key: "sw", row: 0 },
+      { key: "se", row: 1 },
+      { key: "nw", row: 2 },
+      { key: "ne", row: 3 },
+    ];
+
+    for (const dir of dirs) {
+      this.anims.create({
+        key: `warrior-walk-${dir.key}`,
+        frames: this.anims.generateFrameNumbers("warrior-walk", { start: dir.row * 4, end: dir.row * 4 + 3 }),
+        frameRate: 8,
+        repeat: -1,
+      });
+      this.anims.create({
+        key: `warrior-idle-${dir.key}`,
+        frames: this.anims.generateFrameNumbers("warrior-idle", { start: dir.row * 4, end: dir.row * 4 + 3 }),
+        frameRate: 4,
+        repeat: -1,
+      });
+    }
+  }
+
   createGeneratedTextures() {
     const g = this.make.graphics({ x: 0, y: 0, add: false });
 
@@ -334,27 +385,6 @@ class SanctuaryScene extends Phaser.Scene {
     g.fillStyle(0x0a1020, 0.44);
     g.fillEllipse(32, 18, 46, 18);
     g.generateTexture("shadow", 64, 36);
-
-    g.clear();
-    g.fillStyle(0x2b335f, 1);
-    g.beginPath();
-    g.moveTo(15, 50);
-    g.lineTo(24, 12);
-    g.lineTo(34, 50);
-    g.closePath();
-    g.fillPath();
-    g.fillStyle(0xf6d0a5, 1);
-    g.fillCircle(24, 11, 6);
-    g.fillStyle(0xffc97e, 0.92);
-    g.fillCircle(31, 28, 4);
-    g.generateTexture("wanderer", 48, 58);
-
-    g.clear();
-    g.fillStyle(0x8eac72, 1);
-    g.fillEllipse(10, 18, 4, 18);
-    g.fillEllipse(16, 17, 4, 20);
-    g.fillEllipse(22, 18, 4, 16);
-    g.generateTexture("reed", 28, 30);
 
     g.clear();
     g.fillStyle(0xbcb4a6, 1);
@@ -385,37 +415,6 @@ class SanctuaryScene extends Phaser.Scene {
     g.fillStyle(0xffffff, 0.85);
     g.fillCircle(4, 4, 1);
     g.generateTexture("firefly", 12, 12);
-
-    g.clear();
-    g.fillStyle(0xffdd9d, 1);
-    g.fillCircle(8, 8, 3);
-    g.fillStyle(0xf3acd0, 1);
-    g.fillCircle(18, 12, 2);
-    g.fillStyle(0xb8d7ff, 1);
-    g.fillCircle(12, 18, 2);
-    g.generateTexture("flower", 24, 24);
-
-    g.clear();
-    g.fillStyle(0xd3bf93, 1);
-    g.beginPath();
-    g.moveTo(32, 0);
-    g.lineTo(63, 16);
-    g.lineTo(32, 32);
-    g.lineTo(1, 16);
-    g.closePath();
-    g.fillPath();
-    g.generateTexture("sand-diamond", 64, 32);
-
-    g.clear();
-    g.fillStyle(0x345e2b, 1);
-    g.beginPath();
-    g.moveTo(32, 0);
-    g.lineTo(63, 16);
-    g.lineTo(32, 32);
-    g.lineTo(1, 16);
-    g.closePath();
-    g.fillPath();
-    g.generateTexture("grass-diamond", 64, 32);
 
     g.clear();
     g.fillStyle(0x18324d, 1);
@@ -463,22 +462,37 @@ class SanctuaryScene extends Phaser.Scene {
   buildGround() {
     this.groundLayer = this.add.layer();
     this.groundLayer.setDepth(-1000);
+    this.waterGleams = [];
 
     for (let y = 0; y < MAP_H; y++) {
       for (let x = 0; x < MAP_W; x++) {
         const world = isoToWorld(x, y);
         const landHere = this.world.land[y][x];
-        const base = this.add.image(world.x, world.y, landHere ? "grass-diamond" : "water-diamond").setOrigin(0.5, 0.5);
+        const seed = (x * 73 + y * 151 + (x ^ y) * 17) >>> 0;
+        const grassFrame = pick(GRASS_FRAMES, seed);
+        const sandFrame = pick(SAND_FRAMES, seed >> 1);
+        const base = landHere
+          ? this.add.image(world.x, world.y, "grass-tiles", grassFrame).setOrigin(0.5, 0.5).setScale(0.5)
+          : this.add.image(world.x, world.y, "water-diamond").setOrigin(0.5, 0.5);
         base.setDepth(world.y - 1000);
         this.groundLayer.add(base);
 
         const pathMask = this.world.path[y][x];
         if (landHere && pathMask > 0.28) {
-          const sand = this.add.image(world.x, world.y + 2, "sand-diamond").setOrigin(0.5, 0.5);
-          sand.setAlpha(0.18 + pathMask * 0.18);
-          sand.setRotation(0);
+          const sand = this.add.image(world.x, world.y + 1, "sand-tiles", sandFrame).setOrigin(0.5, 0.5).setScale(0.5);
+          sand.setAlpha(0.14 + pathMask * 0.2);
           sand.setDepth(world.y - 999);
           this.groundLayer.add(sand);
+        }
+
+        if (!landHere) {
+          const gleam = this.add.image(world.x, world.y, "water-diamond").setOrigin(0.5, 0.5);
+          gleam.setTint(0x7ad8ff);
+          gleam.setAlpha(0.08 + ((x + y) % 3) * 0.015);
+          gleam.setBlendMode(Phaser.BlendModes.SCREEN);
+          gleam.setDepth(world.y - 998);
+          this.groundLayer.add(gleam);
+          this.waterGleams.push(gleam);
         }
       }
     }
@@ -544,18 +558,33 @@ class SanctuaryScene extends Phaser.Scene {
           ease: "sine.inOut",
         });
         this.fireflyPoints.push({ x: pos.x, y: pos.y - 10, radius: 20 });
-      } else if (prop.type === "flower") {
-        sprite = this.add.image(pos.x, pos.y + 2, "flower").setOrigin(0.5, 0.8);
-        sprite.setScale(0.44 * prop.scale);
-        sprite.setTint(prop.tint);
-      } else if (prop.type === "reed") {
-        sprite = this.add.image(pos.x, pos.y + 3, "reed").setOrigin(0.5, 0.85);
-        sprite.setScale(0.62 * prop.scale);
-        sprite.setTint(prop.tint);
+      } else if (prop.type === "plant") {
+        sprite = this.add.image(pos.x, pos.y + 4, prop.variant).setOrigin(0.5, 0.82);
+        sprite.setScale(prop.scale);
+        sprite.setAlpha(prop.alpha ?? 1);
+      } else if (prop.type.startsWith("ruin-")) {
+        sprite = this.add.image(pos.x, pos.y + 8, prop.type).setOrigin(0.5, 0.84);
+        sprite.setScale(prop.scale);
+        sprite.setAlpha(0.95);
+        if (prop.type === "ruin-ring") {
+          const glow = this.add.circle(pos.x, pos.y - 18, 60, 0x8fd7c3, 0.08).setBlendMode(Phaser.BlendModes.SCREEN);
+          glow.depth = pos.y + 40;
+          this.propLayer.add(glow);
+          this.tweens.add({
+            targets: glow,
+            alpha: { from: 0.05, to: 0.11 },
+            scale: { from: 0.94, to: 1.06 },
+            duration: 2800,
+            repeat: -1,
+            yoyo: true,
+            ease: "sine.inOut",
+          });
+        }
       }
 
       if (sprite) {
-        sprite.depth = pos.y + (prop.type === "tree" ? 120 : 24);
+        const depthBoost = prop.type === "tree" ? 120 : prop.type.startsWith("ruin-") ? 90 : 24;
+        sprite.depth = pos.y + depthBoost;
         this.propLayer.add(sprite);
       }
     }
@@ -565,9 +594,12 @@ class SanctuaryScene extends Phaser.Scene {
     const spawn = isoToWorld(this.world.spawn.x, this.world.spawn.y);
     this.playerWorld = { x: spawn.x, y: spawn.y };
     this.playerRoot = this.add.container(spawn.x, spawn.y);
-    this.playerGlow = this.add.circle(8, -18, 24, 0xffbf73, 0.16).setBlendMode(Phaser.BlendModes.ADD);
+    this.playerDirection = "sw";
+    this.playerGlow = this.add.circle(0, -18, 26, 0xffbf73, 0.14).setBlendMode(Phaser.BlendModes.ADD);
     this.playerShadow = this.add.image(0, 8, "shadow").setScale(0.72).setAlpha(0.52);
-    this.playerSprite = this.add.image(0, 2, "wanderer").setOrigin(0.5, 1);
+    this.playerSprite = this.add.sprite(0, 4, "warrior-idle", 4).setOrigin(0.5, 1);
+    this.playerSprite.setScale(0.5);
+    this.playerSprite.play("warrior-idle-sw");
     this.playerRoot.add([this.playerGlow, this.playerShadow, this.playerSprite]);
     this.playerRoot.setDepth(spawn.y + 200);
   }
@@ -645,9 +677,9 @@ class SanctuaryScene extends Phaser.Scene {
   setupCamera() {
     this.cameras.main.setBounds(0, 0, WORLD_W, WORLD_H);
     this.cameras.main.startFollow(this.playerRoot, true, 0.09, 0.09);
-    this.cameras.main.setZoom(Math.min(window.innerWidth / 1280, window.innerHeight / 800, 1.18));
+    this.cameras.main.setZoom(Math.min(window.innerWidth / 980, window.innerHeight / 680, 1.38));
     this.scale.on("resize", (size) => {
-      this.cameras.main.setZoom(Math.min(size.width / 1280, size.height / 800, 1.18));
+      this.cameras.main.setZoom(Math.min(size.width / 980, size.height / 680, 1.38));
     });
   }
 
@@ -719,6 +751,21 @@ class SanctuaryScene extends Phaser.Scene {
     return this.canWalk(tile.x, tile.y);
   }
 
+  getDirectionForVelocity(worldVX, worldVY) {
+    if (worldVY >= 0 && worldVX >= 0) return "se";
+    if (worldVY >= 0 && worldVX < 0) return "sw";
+    if (worldVY < 0 && worldVX >= 0) return "ne";
+    return "nw";
+  }
+
+  setPlayerAnimation(direction, moving) {
+    this.playerDirection = direction || this.playerDirection;
+    const key = `warrior-${moving ? "walk" : "idle"}-${this.playerDirection}`;
+    if (this.playerSprite.anims.currentAnim?.key !== key) {
+      this.playerSprite.play(key, true);
+    }
+  }
+
   updateScene(time, delta) {
     if (!this.playerWorld || !this.playerRoot || !this.playerSprite) return;
     const dt = delta / 1000;
@@ -735,12 +782,13 @@ class SanctuaryScene extends Phaser.Scene {
       moveY /= length;
       const worldVX = (moveX - moveY) * TILE_W * 0.5 * 2.65;
       const worldVY = (moveX + moveY) * TILE_H * 0.5 * 2.65;
+      this.setPlayerAnimation(this.getDirectionForVelocity(worldVX, worldVY), true);
       const nextX = this.playerWorld.x + worldVX * dt;
       const nextY = this.playerWorld.y + worldVY * dt;
       if (this.canWalkWorld(nextX, this.playerWorld.y)) this.playerWorld.x = nextX;
       if (this.canWalkWorld(this.playerWorld.x, nextY)) this.playerWorld.y = nextY;
-      if (moveX < -0.1) this.playerSprite.setFlipX(true);
-      if (moveX > 0.1) this.playerSprite.setFlipX(false);
+    } else {
+      this.setPlayerAnimation(this.playerDirection, false);
     }
 
     this.playerRoot.x = Phaser.Math.Linear(this.playerRoot.x, this.playerWorld.x, 0.22);
@@ -752,11 +800,16 @@ class SanctuaryScene extends Phaser.Scene {
       this.debugMarker.setPosition(snapped.x, snapped.y);
     }
 
-    const bob = Math.sin(time * 0.005) * 2.2;
-    this.playerSprite.y = 2 + bob;
-    this.playerGlow.radius = 20 + Math.sin(time * 0.003) * 2;
-    this.playerShadow.scaleX = 0.69 + Math.sin(time * 0.005) * 0.03;
-    this.playerShadow.scaleY = 0.69 + Math.sin(time * 0.005) * 0.03;
+    const idlePulse = Math.sin(time * 0.0035);
+    this.playerGlow.radius = 23 + idlePulse * 1.8;
+    this.playerShadow.scaleX = 0.69 + idlePulse * 0.02;
+    this.playerShadow.scaleY = 0.66 + idlePulse * 0.02;
+    if (this.waterGleams?.length) {
+      for (let i = 0; i < this.waterGleams.length; i++) {
+        const gleam = this.waterGleams[i];
+        gleam.alpha = 0.06 + (Math.sin(time * 0.0018 + i * 0.37) + 1) * 0.03;
+      }
+    }
   }
 }
 

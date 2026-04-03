@@ -3,13 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Vibe Jam 2026 - Isometric World Prototype</title>
+<title>Vibe Jam 2026 - Mosslight Reliquary</title>
 <style>
   :root {
     color-scheme: dark;
-    --sky-top: #0d1730;
-    --sky-mid: #17355e;
-    --sky-bottom: #f3b987;
+    --sky-top: #08131f;
+    --sky-mid: #15344d;
+    --sky-bottom: #dfb785;
     --ink: rgba(248, 239, 220, 0.9);
     --muted: rgba(248, 239, 220, 0.52);
   }
@@ -26,8 +26,9 @@
     height: 100%;
     overflow: hidden;
     background:
-      radial-gradient(circle at 50% 18%, rgba(255, 233, 199, 0.26), transparent 24%),
-      linear-gradient(180deg, var(--sky-top) 0%, var(--sky-mid) 46%, #29486e 68%, var(--sky-bottom) 100%);
+      radial-gradient(circle at 52% 16%, rgba(255, 226, 173, 0.2), transparent 22%),
+      radial-gradient(circle at 20% 30%, rgba(84, 165, 133, 0.16), transparent 28%),
+      linear-gradient(180deg, var(--sky-top) 0%, #102131 24%, var(--sky-mid) 52%, #2b4f63 74%, var(--sky-bottom) 100%);
     font-family: Georgia, "Times New Roman", serif;
   }
 
@@ -37,9 +38,9 @@
     inset: 0;
     pointer-events: none;
     background:
-      radial-gradient(circle at 20% 20%, rgba(255, 255, 255, 0.1), transparent 14%),
-      radial-gradient(circle at 75% 12%, rgba(255, 255, 255, 0.08), transparent 10%),
-      radial-gradient(circle at 82% 76%, rgba(255, 200, 122, 0.1), transparent 18%),
+      radial-gradient(circle at 20% 20%, rgba(255, 255, 255, 0.08), transparent 14%),
+      radial-gradient(circle at 74% 16%, rgba(163, 230, 196, 0.12), transparent 12%),
+      radial-gradient(circle at 82% 76%, rgba(255, 200, 122, 0.08), transparent 18%),
       linear-gradient(180deg, rgba(7, 12, 23, 0.12), rgba(7, 12, 23, 0.34));
     mix-blend-mode: screen;
   }
@@ -134,13 +135,13 @@
 <body>
 <div id="game"></div>
 <div id="title">
-  <div class="name">Lowtide Sanctuary</div>
-  <div class="sub">an isometric worldbuilding prototype</div>
+  <div class="name">Mosslight Reliquary</div>
+  <div class="sub">wander the drowned shrine road</div>
 </div>
 <div id="hud">WASD or arrows to wander</div>
 <div id="veil">
   <div class="panel">
-    <div class="headline">Enter The Sanctuary</div>
+    <div class="headline">Enter The Reliquary</div>
     <div class="subline">sound begins on first input</div>
   </div>
 </div>
