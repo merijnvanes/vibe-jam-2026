@@ -599,12 +599,11 @@ class SanctuaryScene extends Phaser.Scene {
     this.playerWorld = { x: spawn.x, y: spawn.y };
     this.playerRoot = this.add.container(spawn.x, spawn.y);
     this.playerDirection = "sw";
-    this.playerGlow = this.add.circle(0, -18, 26, 0xffbf73, 0.14).setBlendMode(Phaser.BlendModes.ADD);
-    this.playerShadow = this.add.image(0, 8, "shadow").setScale(0.72).setAlpha(0.52);
-    this.playerSprite = this.add.sprite(0, 10, "crusader-idle", 0).setOrigin(0.5, 0.92);
+    this.playerShadow = this.add.image(0, 0, "shadow").setScale(0.56, 0.5).setAlpha(0.34);
+    this.playerSprite = this.add.sprite(0, 1, "crusader-idle", 0).setOrigin(0.5, 0.76);
     this.playerSprite.setScale(0.32);
     this.playerSprite.play("crusader-idle-sw");
-    this.playerRoot.add([this.playerGlow, this.playerShadow, this.playerSprite]);
+    this.playerRoot.add([this.playerShadow, this.playerSprite]);
     this.playerRoot.setDepth(spawn.y + 200);
   }
 
@@ -805,9 +804,9 @@ class SanctuaryScene extends Phaser.Scene {
     }
 
     const idlePulse = Math.sin(time * 0.0035);
-    this.playerGlow.radius = 23 + idlePulse * 1.8;
-    this.playerShadow.scaleX = 0.69 + idlePulse * 0.02;
-    this.playerShadow.scaleY = 0.66 + idlePulse * 0.02;
+    this.playerShadow.scaleX = 0.54 + idlePulse * 0.015;
+    this.playerShadow.scaleY = 0.48 + idlePulse * 0.015;
+    this.playerShadow.y = 1 + idlePulse * 0.4;
     if (this.waterGleams?.length) {
       for (let i = 0; i < this.waterGleams.length; i++) {
         const gleam = this.waterGleams[i];
