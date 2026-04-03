@@ -960,6 +960,218 @@ function isNearWater(x, z) {
 }
 
 // ============================================================
+// CANVAS SPRITE GENERATORS
+// ============================================================
+
+function makeCanvasTexture(width, height, drawFn) {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  drawFn(ctx, width, height);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.minFilter = THREE.LinearFilter;
+  return tex;
+}
+
+function createSpriteTree(x, z) {
+  const h = 2.5 + Math.random() * 2;
+  const variant = Math.floor(Math.random() * 3);
+
+  const tex = makeCanvasTexture(128, 192, (ctx, w, hh) => {
+    // Trunk
+    const trunkW = 8 + Math.random() * 4;
+    ctx.fillStyle = '#3a2510';
+    ctx.fillRect(w/2 - trunkW/2, hh * 0.45, trunkW, hh * 0.55);
+    // Slight trunk texture
+    ctx.fillStyle = '#2a1a08';
+    ctx.fillRect(w/2 - trunkW/2 + 2, hh * 0.5, 2, hh * 0.4);
+
+    // Canopy — different shapes per variant
+    const colors = ['#1a4a1a', '#1f3f18', '#143a14'];
+    const highlights = ['#2a5a2a', '#2a5025', '#1e4e1e'];
+
+    if (variant === 0) {
+      // Round bushy tree
+      const gradient = ctx.createRadialGradient(w/2, hh*0.3, 5, w/2, hh*0.3, 45);
+      gradient.addColorStop(0, highlights[0]);
+      gradient.addColorStop(0.6, colors[0]);
+      gradient.addColorStop(1, '#0a2a0a');
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.arc(w/2, hh * 0.3, 42, 0, Math.PI * 2);
+      ctx.fill();
+      // Second smaller cluster
+      ctx.beginPath();
+      ctx.arc(w/2 - 12, hh * 0.22, 25, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(w/2 + 15, hh * 0.25, 22, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (variant === 1) {
+      // Tall pine/conifer
+      for (let i = 0; i < 4; i++) {
+        const y = hh * 0.1 + i * hh * 0.12;
+        const size = 20 + i * 8;
+        ctx.fillStyle = i % 2 === 0 ? colors[1] : highlights[1];
+        ctx.beginPath();
+        ctx.moveTo(w/2, y);
+        ctx.lineTo(w/2 - size, y + hh * 0.15);
+        ctx.lineTo(w/2 + size, y + hh * 0.15);
+        ctx.closePath();
+        ctx.fill();
+      }
+    } else {
+      // Willow-like drooping
+      const gradient = ctx.createRadialGradient(w/2, hh*0.25, 5, w/2, hh*0.35, 50);
+      gradient.addColorStop(0, highlights[2]);
+      gradient.addColorStop(1, '#0a2a0a00');
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.ellipse(w/2, hh * 0.3, 48, 35, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Drooping strands
+      ctx.strokeStyle = '#1a4a1a88';
+      ctx.lineWidth = 1.5;
+      for (let i = 0; i < 12; i++) {
+        const sx = w/2 + (Math.random() - 0.5) * 60;
+        ctx.beginPath();
+        ctx.moveTo(sx, hh * 0.3);
+        ctx.quadraticCurveTo(sx + (Math.random()-0.5)*10, hh*0.45, sx + (Math.random()-0.5)*15, hh*0.55);
+        ctx.stroke();
+      }
+    }
+  });
+
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, alphaTest: 0.1 });
+  const sprite = new THREE.Sprite(mat);
+  const gy = getGroundHeight(x, z);
+  sprite.position.set(x, gy + h * 0.5, z);
+  sprite.scale.set(h * 0.8, h, 1);
+  sprite.castShadow = false;
+  scene.add(sprite);
+  return sprite;
+}
+
+function createFlowerSprite(x, z) {
+  const flowerColors = ['#ff4466', '#ffaa22', '#ff66aa', '#aa44ff', '#44aaff', '#ffff44'];
+  const color = flowerColors[Math.floor(Math.random() * flowerColors.length)];
+
+  const tex = makeCanvasTexture(32, 48, (ctx, w, h) => {
+    // Stem
+    ctx.strokeStyle = '#2a5a1a';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(w/2, h);
+    ctx.quadraticCurveTo(w/2 + (Math.random()-0.5)*6, h*0.5, w/2, h*0.3);
+    ctx.stroke();
+
+    // Petals
+    ctx.fillStyle = color;
+    const petals = 4 + Math.floor(Math.random() * 3);
+    for (let i = 0; i < petals; i++) {
+      const angle = (i / petals) * Math.PI * 2;
+      const px = w/2 + Math.cos(angle) * 6;
+      const py = h * 0.25 + Math.sin(angle) * 5;
+      ctx.beginPath();
+      ctx.arc(px, py, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // Center
+    ctx.fillStyle = '#ffee88';
+    ctx.beginPath();
+    ctx.arc(w/2, h * 0.25, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, alphaTest: 0.1 });
+  const sprite = new THREE.Sprite(mat);
+  const gy = getGroundHeight(x, z);
+  const size = 0.3 + Math.random() * 0.3;
+  sprite.position.set(x, gy + size * 0.4, z);
+  sprite.scale.set(size * 0.6, size, 1);
+  scene.add(sprite);
+  return sprite;
+}
+
+function createNPCSprite(x, z, type = 'wanderer') {
+  const tex = makeCanvasTexture(64, 96, (ctx, w, h) => {
+    // Hooded figure
+    const robeColor = type === 'wanderer' ? '#2a2a4a' : '#4a2a2a';
+    const skinColor = '#ccaa88';
+
+    // Robe body
+    ctx.fillStyle = robeColor;
+    ctx.beginPath();
+    ctx.moveTo(w/2 - 14, h * 0.35);
+    ctx.lineTo(w/2 - 18, h * 0.95);
+    ctx.lineTo(w/2 + 18, h * 0.95);
+    ctx.lineTo(w/2 + 14, h * 0.35);
+    ctx.closePath();
+    ctx.fill();
+
+    // Hood
+    ctx.beginPath();
+    ctx.arc(w/2, h * 0.28, 16, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Face shadow inside hood
+    ctx.fillStyle = '#0a0a0a';
+    ctx.beginPath();
+    ctx.arc(w/2, h * 0.28, 11, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Eyes — two small glowing dots
+    const eyeColor = type === 'wanderer' ? '#88ccff' : '#ff4444';
+    ctx.fillStyle = eyeColor;
+    ctx.shadowColor = eyeColor;
+    ctx.shadowBlur = 6;
+    ctx.beginPath();
+    ctx.arc(w/2 - 4, h * 0.27, 1.8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(w/2 + 4, h * 0.27, 1.8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // Staff
+    if (type === 'wanderer') {
+      ctx.strokeStyle = '#5a3a1a';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(w/2 + 20, h * 0.05);
+      ctx.lineTo(w/2 + 16, h * 0.95);
+      ctx.stroke();
+      // Staff orb
+      ctx.fillStyle = '#44ffaa';
+      ctx.shadowColor = '#44ffaa';
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.arc(w/2 + 20, h * 0.06, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+  });
+
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, alphaTest: 0.05 });
+  const sprite = new THREE.Sprite(mat);
+  const gy = getGroundHeight(x, z);
+  sprite.position.set(x, gy + 0.8, z);
+  sprite.scale.set(1.0, 1.5, 1);
+  scene.add(sprite);
+
+  // NPC glow light
+  const glowColor = type === 'wanderer' ? 0x44ffaa : 0xff4444;
+  const light = new THREE.PointLight(glowColor, 1.0, 6);
+  light.position.set(x, gy + 1.5, z);
+  scene.add(light);
+
+  return { sprite, light, baseX: x, baseZ: z, phase: Math.random() * Math.PI * 2, type };
+}
+
+const npcs = [];
+
+// ============================================================
 // WORLD GENERATION
 // ============================================================
 function generateWorld() {
@@ -1054,6 +1266,33 @@ function generateWorld() {
 
   // Water pond
   createPond(8, -6, 3);
+
+  // Sprite trees — scattered in the far areas (mix with geometric trees)
+  for (let i = 0; i < 60; i++) {
+    const x = (Math.random() - 0.5) * 65;
+    const z = (Math.random() - 0.5) * 65;
+    const dist = Math.sqrt(x * x + z * z);
+    if (dist < 8) continue;
+    if (isNearWater(x, z)) continue;
+    const density = fbm(x * 0.05 + 300, z * 0.05 + 300, 2) * 0.5 + 0.5;
+    if (Math.random() > density * 0.5) continue;
+    createSpriteTree(x, z);
+  }
+
+  // Flowers — clusters in mossy areas
+  for (let i = 0; i < 80; i++) {
+    const x = (Math.random() - 0.5) * 50;
+    const z = (Math.random() - 0.5) * 50;
+    const n = fbm(x * 0.3 + 100, z * 0.3, 2) * 0.5 + 0.5;
+    if (n < 0.5) continue; // Only in mossy patches
+    createFlowerSprite(x, z);
+  }
+
+  // NPCs — mysterious figures at points of interest
+  npcs.push(createNPCSprite(-5, -4, 'wanderer'));   // Near ruins
+  npcs.push(createNPCSprite(11, 7, 'wanderer'));     // Near campfire
+  npcs.push(createNPCSprite(-12, 10, 'guardian'));    // Near far ruins
+  npcs.push(createNPCSprite(6, -8, 'wanderer'));     // In the wild
 
   // Collectible orbs
   const orbPositions = [
@@ -1428,6 +1667,21 @@ function animate() {
       orb.light.position.y = orb.mesh.position.y + 0.1;
       orb.light.intensity = 0.3 + Math.sin(time * 3 + orb.phase) * 0.2;
     }
+  }
+
+  // ---- NPC Idle Animation ----
+  for (const npc of npcs) {
+    // Gentle hover
+    const gy = getGroundHeight(npc.baseX, npc.baseZ);
+    npc.sprite.position.y = gy + 0.8 + Math.sin(time * 1.2 + npc.phase) * 0.1;
+    // Slow wander in small circle
+    npc.sprite.position.x = npc.baseX + Math.sin(time * 0.3 + npc.phase) * 0.5;
+    npc.sprite.position.z = npc.baseZ + Math.cos(time * 0.25 + npc.phase) * 0.5;
+    npc.light.position.x = npc.sprite.position.x;
+    npc.light.position.z = npc.sprite.position.z;
+    npc.light.position.y = npc.sprite.position.y + 0.7;
+    // Pulse light
+    npc.light.intensity = 0.8 + Math.sin(time * 2 + npc.phase) * 0.3;
   }
 
   // ---- Stars twinkle ----
