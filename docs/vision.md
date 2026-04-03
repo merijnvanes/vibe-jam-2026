@@ -36,6 +36,8 @@ Free-to-play + contest traffic = runtime costs matter.
 - The vibe is **fixed by design**, not dynamically generated per player
 - **Efficiency is a design constraint** — every feature must justify its server cost at scale. With free-to-play and contest traffic, budget is tight. Keep server logic lean, prefer client-side computation where possible, and treat complexity as a cost multiplier.
 
+This means the atmosphere, assets, and world are authored upfront. The trade-off: less personalisation, but a tighter, more intentional experience.
+
 ## Strategy
 
 Judges reward **feel, personality, and instant fun** — not technical complexity (see [2025 winners](2025-winners-announcement.md)).
