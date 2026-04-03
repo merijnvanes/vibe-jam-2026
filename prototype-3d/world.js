@@ -882,6 +882,64 @@ async function loadPlayer() {
 }
 
 // ============================================================
+// NPCs — animated characters placed in the world
+// ============================================================
+const npcMixers = [];
+
+async function loadNPC(file, x, z, rotY, animName, scale = 1) {
+  const loader = new GLTFLoader();
+  const gltf = await loader.loadAsync(`assets/${file}`);
+  const model = gltf.scene;
+  model.scale.setScalar(scale);
+
+  model.traverse(child => {
+    if (child.isMesh) {
+      child.castShadow = true;
+      child.receiveShadow = false;
+    }
+  });
+
+  const y = getGroundHeight(x, z);
+  model.position.set(x, y, z);
+  model.rotation.y = rotY;
+  scene.add(model);
+
+  // Play requested animation (loop)
+  const npcMixer = new THREE.AnimationMixer(model);
+  const clip = gltf.animations.find(c => c.name === animName)
+    || gltf.animations.find(c => c.name === 'Idle')
+    || gltf.animations[0];
+  if (clip) {
+    const action = npcMixer.clipAction(clip);
+    action.play();
+    // Offset time so NPCs aren't synchronized
+    action.time = Math.random() * clip.duration;
+  }
+  npcMixers.push(npcMixer);
+  return model;
+}
+
+function loadAllNPCs() {
+  return Promise.all([
+    // Knight guarding near spawn ruins
+    loadNPC('Knight.glb', 3, -1.5, Math.PI * 0.8, '2H_Melee_Idle'),
+    // Mage by the campfire
+    loadNPC('Mage.glb', 2, -3.5, Math.PI * 0.3, 'Spellcasting'),
+    // Barbarian near the pond
+    loadNPC('Barbarian.glb', 6.5, -5, -Math.PI * 0.4, 'Idle'),
+    // Rogue sitting by second campfire
+    loadNPC('Rogue.glb', -6.5, -3.5, Math.PI * 0.6, 'Sit_Floor_Idle'),
+    // Skeletons lurking near far ruins
+    loadNPC('Skeleton_Warrior.glb', 10.5, 8.5, -Math.PI * 0.7, '2H_Melee_Idle'),
+    loadNPC('Skeleton_Warrior.glb', 12.5, 6.5, Math.PI * 0.2, 'Walking_A'),
+    loadNPC('Skeleton_Mage.glb', 11, 9.5, Math.PI, 'Spellcasting'),
+    // Skeleton patrol near southern ruins
+    loadNPC('Skeleton_Minion.glb', -12, 10.5, 0.5, 'Idle_B'),
+    loadNPC('Skeleton_Minion.glb', -13.5, 9.5, -0.8, 'Idle'),
+  ]);
+}
+
+// ============================================================
 // FOOTSTEP PARTICLES
 // ============================================================
 function createFootstepSystem() {
@@ -1280,8 +1338,8 @@ embers = createEmberParticles();
 fogGroup = createGroundFog();
 footsteps = createFootstepSystem();
 
-// Load player model, then start game
-loadPlayer().then(obj => {
+// Load player + NPCs, then start game
+Promise.all([loadPlayer(), loadAllNPCs()]).then(([obj]) => {
   playerObj = obj;
   document.getElementById('loading').classList.add('fade');
   setTimeout(() => document.getElementById('loading').style.display = 'none', 1000);
@@ -1360,6 +1418,7 @@ function animate() {
     }
     mixer.update(dt);
   }
+  for (const npcMixer of npcMixers) npcMixer.update(dt);
 
   // Update player position
   const groundY = getGroundHeight(player.x, player.z);
