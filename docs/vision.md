@@ -34,8 +34,7 @@ Free-to-play + contest traffic = runtime costs matter.
 - **No on-the-fly generation** of music, visuals, or heavy assets — all pre-generated and baked in
 - **AI NPCs** can use a cheap LLM for text responses only — that's the one place we can afford runtime AI
 - The vibe is **fixed by design**, not dynamically generated per player
-
-This means the atmosphere, assets, and world are authored upfront. The trade-off: less personalisation, but a tighter, more intentional experience.
+- **Efficiency is a design constraint** — every feature must justify its server cost at scale. With free-to-play and contest traffic, budget is tight. Keep server logic lean, prefer client-side computation where possible, and treat complexity as a cost multiplier.
 
 ## Strategy
 
