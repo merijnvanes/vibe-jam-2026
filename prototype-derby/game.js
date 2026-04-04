@@ -19,7 +19,7 @@ const MAX_ENGINE_FORCE = 1500;
 const MAX_SPEED = 16; // m/s (~58 km/h)
 const ACCELERATION = 22; // m/s² — punchy arcade feel
 const BRAKE_DECEL = 25;
-const MAX_STEER = 0.6;
+const MAX_STEER = 0.4;
 const BRAKE_FORCE = 50;
 const BOOST_IMPULSE = 500;
 const BOOST_COOLDOWN = 3.0;
@@ -422,7 +422,7 @@ function createVehicle(position, carMat) {
   const chassisBody = new CANNON.Body({ mass: CAR_MASS, material: carMat });
   chassisBody.addShape(chassisShape, new CANNON.Vec3(0, -0.3, 0));
   chassisBody.position.copy(position);
-  chassisBody.angularDamping = 0.9;
+  chassisBody.angularDamping = 0.7;
   chassisBody.linearDamping = 0.05;
 
   const vehicle = new CANNON.RaycastVehicle({
@@ -451,9 +451,9 @@ function createVehicle(position, carMat) {
   // Front wheels (steering) — at -Z end (car faces -Z)
   vehicle.addWheel({ ...wheelOpts, chassisConnectionPointLocal: new CANNON.Vec3(-0.85, -0.1, -1.3) });
   vehicle.addWheel({ ...wheelOpts, chassisConnectionPointLocal: new CANNON.Vec3(0.85, -0.1, -1.3) });
-  // Rear wheels (drive) — at +Z end (behind the car)
-  vehicle.addWheel({ ...wheelOpts, chassisConnectionPointLocal: new CANNON.Vec3(-0.9, -0.1, 1.4), frictionSlip: 3.5 });
-  vehicle.addWheel({ ...wheelOpts, chassisConnectionPointLocal: new CANNON.Vec3(0.9, -0.1, 1.4), frictionSlip: 3.5 });
+  // Rear wheels (drive) — at +Z end (behind the car) — more grip than front for stability
+  vehicle.addWheel({ ...wheelOpts, chassisConnectionPointLocal: new CANNON.Vec3(-0.9, -0.1, 1.4), frictionSlip: 5.5 });
+  vehicle.addWheel({ ...wheelOpts, chassisConnectionPointLocal: new CANNON.Vec3(0.9, -0.1, 1.4), frictionSlip: 5.5 });
 
   vehicle.addToWorld(world);
 
@@ -909,10 +909,6 @@ function updateBot(index, dt) {
   bot.vehicle.applyEngineForce(dot > -0.3 ? -80 : 80, 2);
   bot.vehicle.applyEngineForce(dot > -0.3 ? -80 : 80, 3);
 
-  // Also apply steering torque for bots
-  if (Math.abs(steerValue) > 0.1) {
-    bot.chassisBody.angularVelocity.y += -steerValue * 50 * dt * Math.min(speed / 5, 1);
-  }
 
 
   if (speed > 3) {
@@ -1311,6 +1307,16 @@ function updatePlayer(dt) {
     }
   }
 
+  // Align velocity with car heading — prevents drifty/slidey feel
+  // Decompose velocity into forward and lateral components
+  const velForward = forwardSpeed;
+  const right = playerChassis.quaternion.vmult(new CANNON.Vec3(1, 0, 0));
+  const lateralSpeed = right.x * vel.x + right.z * vel.z;
+  // Kill most lateral velocity (keep ~15% for slight slide feel)
+  const lateralGrip = 0.85;
+  vel.x -= right.x * lateralSpeed * lateralGrip;
+  vel.z -= right.z * lateralSpeed * lateralGrip;
+
   // Natural deceleration when not pressing gas
   if (!accelerating && !braking) {
     vel.x *= Math.pow(0.3, dt);
@@ -1329,13 +1335,6 @@ function updatePlayer(dt) {
   if (steerRight) steerValue = -MAX_STEER * speedFactor;
   playerVehicle.setSteeringValue(steerValue, 0);
   playerVehicle.setSteeringValue(steerValue, 1);
-
-  // Additional steering torque for snappier turns
-  if (steerLeft || steerRight) {
-    const turnDir = steerLeft ? 1 : -1;
-    const turnTorque = turnDir * 80 * Math.min(speed / 5, 1);
-    playerChassis.angularVelocity.y += turnTorque * dt;
-  }
 
   // Boost
   boostCooldown = Math.max(0, boostCooldown - dt);
