@@ -31,6 +31,7 @@ let playerVehicleController, playerChassis, playerMesh;
 let playerWheelMeshes = [];
 let botVehicles = [];
 let carModel = null;
+let wheelModel = null;
 let keys = {};
 let boostCooldown = 0;
 let cameraShake = new THREE.Vector3();
@@ -499,36 +500,13 @@ function createVehicle(x, y, z) {
   // Vehicle controller
   const vc = world.createVehicleController(chassis);
 
-  // Front wheels at -Z (car faces -Z)
-  vc.addWheel(
-    { x: -0.85, y: -0.1, z: -1.3 },  // chassisConnectionCs
-    { x: 0, y: -1, z: 0 },            // directionCs (suspension)
-    { x: -1, y: 0, z: 0 },            // axleCs
-    0.6,                                // suspensionRestLength
-    0.4                                 // radius
-  );
-  vc.addWheel(
-    { x: 0.85, y: -0.1, z: -1.3 },
-    { x: 0, y: -1, z: 0 },
-    { x: -1, y: 0, z: 0 },
-    0.6,
-    0.4
-  );
-  // Rear wheels at +Z
-  vc.addWheel(
-    { x: -0.9, y: -0.1, z: 1.4 },
-    { x: 0, y: -1, z: 0 },
-    { x: -1, y: 0, z: 0 },
-    0.6,
-    0.4
-  );
-  vc.addWheel(
-    { x: 0.9, y: -0.1, z: 1.4 },
-    { x: 0, y: -1, z: 0 },
-    { x: -1, y: 0, z: 0 },
-    0.6,
-    0.4
-  );
+  // Wheel positions from wheel-tuner.html (connection points pre-compensated for suspension)
+  // Front wheels (steering)
+  vc.addWheel({x: -0.8, y: 0.1, z: -1.35}, {x:0,y:-1,z:0}, {x:-1,y:0,z:0}, 0.6, 0.32);
+  vc.addWheel({x: 0.8, y: 0.1, z: -1.35}, {x:0,y:-1,z:0}, {x:-1,y:0,z:0}, 0.6, 0.32);
+  // Rear wheels (drive)
+  vc.addWheel({x: -0.8, y: 0.1, z: 1.05}, {x:0,y:-1,z:0}, {x:-1,y:0,z:0}, 0.6, 0.32);
+  vc.addWheel({x: 0.8, y: 0.1, z: 1.05}, {x:0,y:-1,z:0}, {x:-1,y:0,z:0}, 0.6, 0.32);
 
   // Suspension tuning
   for (let i = 0; i < 4; i++) {
@@ -539,14 +517,19 @@ function createVehicle(x, y, z) {
     vc.setWheelFrictionSlip(i, 5.0);
   }
 
-  // Wheel meshes
+  // Wheel meshes — animated for steering and spin
   const wheelMeshes = [];
   for (let i = 0; i < 4; i++) {
-    const wheelGeo = new THREE.CylinderGeometry(0.4, 0.4, 0.3, 16);
-    wheelGeo.rotateZ(Math.PI / 2);
-    const wheelMesh = new THREE.Mesh(wheelGeo, new THREE.MeshStandardMaterial({
-      color: 0x222222, roughness: 0.8, metalness: 0.2,
-    }));
+    let wheelMesh;
+    if (wheelModel) {
+      wheelMesh = wheelModel.clone();
+    } else {
+      const wheelGeo = new THREE.CylinderGeometry(0.4, 0.4, 0.3, 16);
+      wheelGeo.rotateZ(Math.PI / 2);
+      wheelMesh = new THREE.Mesh(wheelGeo, new THREE.MeshStandardMaterial({
+        color: 0x222222, roughness: 0.8, metalness: 0.2,
+      }));
+    }
     wheelMesh.castShadow = true;
     scene.add(wheelMesh);
     wheelMeshes.push(wheelMesh);
@@ -1452,6 +1435,31 @@ async function loadCarModel() {
   }
 }
 
+async function loadWheelModel() {
+  const loader = new GLTFLoader();
+  try {
+    const gltf = await loader.loadAsync('assets/wheel.glb');
+    wheelModel = gltf.scene;
+    // Scale to match wheel radius (0.4 units)
+    const box = new THREE.Box3().setFromObject(wheelModel);
+    const size = box.getSize(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z);
+    const scale = 0.64 / maxDim; // diameter = 0.64 (radius 0.32)
+    wheelModel.scale.setScalar(scale);
+    // Center it
+    const box2 = new THREE.Box3().setFromObject(wheelModel);
+    const center = box2.getCenter(new THREE.Vector3());
+    wheelModel.position.sub(center);
+    wheelModel.traverse(child => {
+      if (child.isMesh) { child.castShadow = true; child.receiveShadow = true; }
+    });
+    return true;
+  } catch (e) {
+    console.log('No wheel.glb found, using cylinder wheels');
+    return false;
+  }
+}
+
 // ============================================================
 // CAMERA
 // ============================================================
@@ -1752,7 +1760,7 @@ async function init() {
   createStadium();
   loadBar.style.width = '40%';
 
-  await loadCarModel();
+  await Promise.all([loadCarModel(), loadWheelModel()]);
   loadBar.style.width = '60%';
 
   initParticles();
