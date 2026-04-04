@@ -53,7 +53,7 @@ let botRespawnTimers = [];
 let botWrecked = [];
 
 // HUD elements
-let speedValueEl, boostFillEl, scoreEl;
+let speedValueEl, boostFillEl, scoreEl, healthFillEl;
 
 // ============================================================
 // SCENE SETUP
@@ -156,6 +156,7 @@ function initScene() {
   speedValueEl = document.getElementById('speed-value');
   boostFillEl = document.getElementById('boost-fill');
   scoreEl = document.getElementById('score');
+  healthFillEl = document.getElementById('health-fill');
 }
 
 // ============================================================
@@ -1398,6 +1399,8 @@ function updatePlayer(dt) {
   // HUD
   speedValueEl.textContent = String(Math.round(speed * 3.6));
   boostFillEl.style.width = Math.max(0, (1 - boostCooldown / BOOST_COOLDOWN) * 100) + '%';
+  const hullPct = Math.max(0, (1 - playerDamage / 35) * 100);
+  healthFillEl.style.width = hullPct + '%';
   // Engine sound based on actual speed and whether ANY throttle/brake is pressed
   updateEngineSound(speed, accelerating || braking);
 }

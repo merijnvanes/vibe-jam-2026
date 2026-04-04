@@ -53,9 +53,18 @@
     background: linear-gradient(90deg, #ff6b2b, #ffaa00);
     border-radius: 4px; transition: width 0.1s;
   }
-  #boost-label {
+  #boost-label, #health-label {
     color: rgba(255,180,120,0.5); font-size: 11px; letter-spacing: 2px;
     text-transform: uppercase; font-family: 'Arial', sans-serif;
+  }
+  #health-bar {
+    width: 120px; height: 8px; background: rgba(255,255,255,0.1);
+    border-radius: 4px; overflow: hidden; border: 1px solid rgba(255,50,30,0.3);
+  }
+  #health-fill {
+    width: 100%; height: 100%;
+    background: linear-gradient(90deg, #ff2200, #44ff44);
+    border-radius: 4px; transition: width 0.2s;
   }
   #controls-hint {
     position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
@@ -113,6 +122,10 @@
   <div>
     <div id="boost-label">BOOST</div>
     <div id="boost-bar"><div id="boost-fill"></div></div>
+  </div>
+  <div>
+    <div id="health-label">HP</div>
+    <div id="health-bar"><div id="health-fill"></div></div>
   </div>
 </div>
 <div id="score-display">
