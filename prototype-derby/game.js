@@ -1355,25 +1355,32 @@ function createStadium() {
   const standDepth = 15;
   const standOffset = ARENA_SIZE + standDepth / 2 + WALL_THICKNESS;
 
-  const sides = [
-    { x: 0, z: -standOffset, ry: 0 },
-    { x: 0, z: standOffset, ry: Math.PI },
-    { x: -standOffset, z: 0, ry: Math.PI / 2 },
-    { x: standOffset, z: 0, ry: -Math.PI / 2 },
+  // 4 sides: each defined explicitly with spread axis and outward axis
+  // spreadAxis = direction dots spread along the stand face
+  // outAxis = direction tiers step outward (away from arena)
+  const sideConfigs = [
+    { cx: 0, cz: -standOffset, spreadX: 1, spreadZ: 0, outX: 0, outZ: -1, ry: 0 },         // north
+    { cx: 0, cz: standOffset,  spreadX: 1, spreadZ: 0, outX: 0, outZ: 1,  ry: Math.PI },    // south
+    { cx: -standOffset, cz: 0, spreadX: 0, spreadZ: 1, outX: -1, outZ: 0, ry: Math.PI / 2 },// west
+    { cx: standOffset,  cz: 0, spreadX: 0, spreadZ: 1, outX: 1, outZ: 0,  ry: -Math.PI / 2 }, // east
   ];
 
   const crowdColors = [0xff3333, 0x3333ff, 0xffff33, 0x33ff33, 0xff6600, 0xffffff];
   const dotGeo = new THREE.SphereGeometry(0.2, 4, 4);
+  const standWidth = ARENA_SIZE * 1.8;
 
-  sides.forEach(side => {
+  sideConfigs.forEach(side => {
     for (let tier = 0; tier < 3; tier++) {
       const tierMesh = new THREE.Mesh(
-        new THREE.BoxGeometry(ARENA_SIZE * 1.8, 1.5, standDepth / 3),
+        new THREE.BoxGeometry(standWidth, 1.5, standDepth / 3),
         standMat
       );
       const yOffset = tier * 2.5 + 1;
-      const dir = new THREE.Vector3(-Math.sin(side.ry), 0, -Math.cos(side.ry));
-      tierMesh.position.set(side.x + dir.x * tier * 2, yOffset, side.z + dir.z * tier * 2);
+      tierMesh.position.set(
+        side.cx + side.outX * tier * 2,
+        yOffset,
+        side.cz + side.outZ * tier * 2
+      );
       tierMesh.rotation.y = side.ry;
       tierMesh.receiveShadow = true;
       scene.add(tierMesh);
@@ -1384,12 +1391,11 @@ function createStadium() {
         color: crowdColors[Math.floor(Math.random() * crowdColors.length)]
       }));
       const tier = Math.floor(Math.random() * 3);
-      const spread = (Math.random() - 0.5) * ARENA_SIZE * 1.6;
-      const dir = new THREE.Vector3(-Math.sin(side.ry), 0, -Math.cos(side.ry));
+      const along = (Math.random() - 0.5) * standWidth;
       dot.position.set(
-        side.x + spread * Math.cos(side.ry) + dir.x * tier * 2,
+        side.cx + side.spreadX * along + side.outX * tier * 2,
         tier * 2.5 + 2.2,
-        side.z + spread * Math.sin(side.ry + Math.PI / 2) + dir.z * tier * 2
+        side.cz + side.spreadZ * along + side.outZ * tier * 2
       );
       scene.add(dot);
     }
