@@ -688,23 +688,33 @@ class ParticlePool {
   }
 
   update(dt, gravity = -5) {
+    // Update physics for active particles
     for (let i = 0; i < this.count; i++) {
       if (!this.active[i]) continue;
       this.lifetimes[i] -= dt;
       if (this.lifetimes[i] <= 0) {
         this.active[i] = 0;
-        this.sizes[i] = 0;
         continue;
       }
-      const t = this.lifetimes[i] / this.maxLifetimes[i];
       this.velocities[i * 3 + 1] += gravity * dt;
       this.positions[i * 3] += this.velocities[i * 3] * dt;
       this.positions[i * 3 + 1] += this.velocities[i * 3 + 1] * dt;
       this.positions[i * 3 + 2] += this.velocities[i * 3 + 2] * dt;
-      this.sizes[i] = this.baseSize * t;
     }
+
+    // Pack active particles to the front of the position buffer
+    // so drawRange only renders living particles
+    const renderPos = this.geometry.attributes.position.array;
+    let writeIdx = 0;
+    for (let i = 0; i < this.count; i++) {
+      if (!this.active[i]) continue;
+      renderPos[writeIdx * 3] = this.positions[i * 3];
+      renderPos[writeIdx * 3 + 1] = this.positions[i * 3 + 1];
+      renderPos[writeIdx * 3 + 2] = this.positions[i * 3 + 2];
+      writeIdx++;
+    }
+    this.geometry.setDrawRange(0, writeIdx);
     this.geometry.attributes.position.needsUpdate = true;
-    this.geometry.attributes.size.needsUpdate = true;
   }
 }
 
