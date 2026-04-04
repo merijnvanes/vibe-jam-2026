@@ -202,8 +202,8 @@ async function initPhysics() {
       const z = (i / rows - 0.5) * ARENA_SIZE * 2;
       // Simple noise approximation
       heights[i * (cols + 1) + j] =
-        Math.sin(x * 0.3) * Math.cos(z * 0.2) * 0.06 +
-        Math.sin(x * 0.7 + z * 0.5) * 0.04;
+        Math.sin(x * 0.3) * Math.cos(z * 0.2) * 0.02 +
+        Math.sin(x * 0.7 + z * 0.5) * 0.015;
     }
   }
   const heightBody = world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
@@ -532,9 +532,9 @@ function createVehicle(x, y, z) {
 
   // Suspension tuning
   for (let i = 0; i < 4; i++) {
-    vc.setWheelSuspensionStiffness(i, 24.0);
-    vc.setWheelSuspensionCompression(i, 4.4);
-    vc.setWheelSuspensionRelaxation(i, 2.3);
+    vc.setWheelSuspensionStiffness(i, 30.0);
+    vc.setWheelSuspensionCompression(i, 8.0);
+    vc.setWheelSuspensionRelaxation(i, 5.0);
     vc.setWheelMaxSuspensionTravel(i, 0.4);
     vc.setWheelFrictionSlip(i, 5.0);
   }
@@ -1101,7 +1101,8 @@ function updateBot(index, dt) {
 
   // Steering (front wheels)
   const currentSteer = bot.vehicleController.wheelSteering(0) || 0;
-  const smoothSteer = THREE.MathUtils.lerp(currentSteer, steerValue, 0.2);
+  const botSteerRate = 1 - Math.pow(0.001, dt);
+  const smoothSteer = THREE.MathUtils.lerp(currentSteer, steerValue, botSteerRate);
   bot.vehicleController.setWheelSteering(0, smoothSteer);
   bot.vehicleController.setWheelSteering(1, smoothSteer);
 
@@ -1523,13 +1524,16 @@ function updatePlayer(dt) {
   const forwardSpeed = fwd.x * vel.x + fwd.z * vel.z;
 
   // Steering (front wheels 0,1)
-  const speedFactor = Math.max(0.3, 1 - speed / 50);
+  // Steering narrows at speed: full at 0, 20% at 120km/h — prevents high-speed oscillation
+  const speedFactor = Math.max(0.2, 1 - speed / 40);
   let steerInput = 0;
   if (steerLeft) steerInput = 1;
   if (steerRight) steerInput = -1;
   const steerAngle = MAX_STEER * speedFactor * steerInput;
   const currentSteer = playerVehicleController.wheelSteering(0) || 0;
-  const smoothSteer = THREE.MathUtils.lerp(currentSteer, steerAngle, 0.2);
+  // Frame-rate independent steering smoothing — slower response at high speed for stability
+  const steerLerpRate = 1 - Math.pow(0.001, dt); // ~95% per second, dt-independent
+  const smoothSteer = THREE.MathUtils.lerp(currentSteer, steerAngle, steerLerpRate);
   playerVehicleController.setWheelSteering(0, smoothSteer);
   playerVehicleController.setWheelSteering(1, smoothSteer);
 
@@ -1692,13 +1696,17 @@ function animate() {
   const dt = Math.min(clock.getDelta(), 0.05);
   const time = clock.elapsedTime;
 
-  // Update all vehicle controllers before stepping
-  playerVehicleController.updateVehicle(dt);
-  for (let i = 0; i < botVehicles.length; i++) {
-    botVehicles[i].vehicleController.updateVehicle(dt);
+  // Fixed timestep sub-stepping at 120Hz for stability at high speed
+  const fixedStep = 1 / 180;
+  const numSteps = Math.min(Math.ceil(dt / fixedStep), 6); // cap at 6 substeps
+  for (let s = 0; s < numSteps; s++) {
+    playerVehicleController.updateVehicle(fixedStep);
+    for (let i = 0; i < botVehicles.length; i++) {
+      botVehicles[i].vehicleController.updateVehicle(fixedStep);
+    }
+    world.timestep = fixedStep;
+    world.step(eventQueue);
   }
-
-  world.step(eventQueue);
 
   // Process collision events
   processCollisions();
