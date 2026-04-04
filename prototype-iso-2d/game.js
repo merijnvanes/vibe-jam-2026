@@ -525,8 +525,6 @@ class SanctuaryScene extends Phaser.Scene {
   }
 
   buildProps() {
-    this.propLayer = this.add.layer();
-    this.propLayer.setDepth(10);
     this.fireflyPoints = [];
 
     for (const prop of this.world.props) {
@@ -543,15 +541,13 @@ class SanctuaryScene extends Phaser.Scene {
         sprite.setScale(prop.tall ? 0.96 : 0.84);
         if (prop.glow) {
           const glow = this.add.circle(pos.x, pos.y - 8, 14, 0xa7c8ff, 0.11).setBlendMode(Phaser.BlendModes.ADD);
-          glow.depth = pos.y - 3;
-          this.propLayer.add(glow);
+          glow.setDepth(pos.y - 3);
           this.fireflyPoints.push({ x: pos.x, y: pos.y - 8, radius: 20 });
         }
       } else if (prop.type === "lantern") {
         sprite = this.add.image(pos.x, pos.y + 2, "lantern").setOrigin(0.5, 0.9);
         const glow = this.add.circle(pos.x, pos.y - 4, 22, 0xffb263, 0.13).setBlendMode(Phaser.BlendModes.ADD);
-        glow.depth = pos.y - 1;
-        this.propLayer.add(glow);
+        glow.setDepth(pos.y - 1);
         this.tweens.add({
           targets: glow,
           alpha: { from: 0.08, to: 0.16 },
@@ -572,8 +568,7 @@ class SanctuaryScene extends Phaser.Scene {
         sprite.setAlpha(0.95);
         if (prop.type === "ruin-ring") {
           const glow = this.add.circle(pos.x, pos.y - 18, 60, 0x8fd7c3, 0.08).setBlendMode(Phaser.BlendModes.SCREEN);
-          glow.depth = pos.y + 40;
-          this.propLayer.add(glow);
+          glow.setDepth(pos.y + 40);
           this.tweens.add({
             targets: glow,
             alpha: { from: 0.05, to: 0.11 },
@@ -587,9 +582,7 @@ class SanctuaryScene extends Phaser.Scene {
       }
 
       if (sprite) {
-        const depthBoost = prop.type === "tree" ? 120 : prop.type.startsWith("ruin-") ? 90 : 24;
-        sprite.depth = pos.y + depthBoost;
-        this.propLayer.add(sprite);
+        sprite.setDepth(sprite.y);
       }
     }
   }
@@ -604,7 +597,7 @@ class SanctuaryScene extends Phaser.Scene {
     this.playerSprite.setScale(0.32);
     this.playerSprite.play("crusader-idle-sw");
     this.playerRoot.add([this.playerShadow, this.playerSprite]);
-    this.playerRoot.setDepth(spawn.y + 200);
+    this.playerRoot.setDepth(spawn.y + 1);
   }
 
   createAtmosphere() {
@@ -796,7 +789,7 @@ class SanctuaryScene extends Phaser.Scene {
 
     this.playerRoot.x = Phaser.Math.Linear(this.playerRoot.x, this.playerWorld.x, 0.22);
     this.playerRoot.y = Phaser.Math.Linear(this.playerRoot.y, this.playerWorld.y, 0.22);
-    this.playerRoot.depth = this.playerRoot.y + 200;
+    this.playerRoot.depth = this.playerRoot.y + 1;
     if (this.debugMarker) {
       const tile = worldToTile(this.playerWorld.x, this.playerWorld.y);
       const snapped = isoToWorld(Math.round(tile.x), Math.round(tile.y));
