@@ -455,17 +455,6 @@ function createArenaProps() {
     rampBody2
   );
 
-  // Warning stripes on ramps
-  const stripeGeo = new THREE.PlaneGeometry(rampWidth - 0.5, 0.3);
-  const stripeMat = new THREE.MeshStandardMaterial({
-    color: 0xff6600, emissive: 0x331100, roughness: 0.5
-  });
-  for (let s = 0; s < 4; s++) {
-    const stripe = new THREE.Mesh(stripeGeo, stripeMat);
-    stripe.position.set(12, rampHeight / 2 + 0.2 + s * 0.1, 12 - rampLength / 2 + 1 + s * 1.8);
-    stripe.rotation.x = -Math.PI / 2 + Math.atan2(rampHeight, rampLength);
-    scene.add(stripe);
-  }
 }
 
 // ============================================================
