@@ -45,8 +45,23 @@ let playerRespawnTimer = 0;
 let baseFov = 60;
 let currentFov = 60;
 let sparkPool, smokePool, firePool, dustPool, debrisPool;
-let audioCtx, engineOsc1, engineOsc2, engineFilter, engineGain;
+let audioCtx;
 let audioStarted = false;
+let audioLoading = false;
+let engineBuffers = []; // 6 engine loops at different pitches
+let engineSources = []; // currently playing engine loop sources
+let engineGains = [];   // per-loop gain nodes
+let crashMetalBuffers = [];  // metallic crunch layer
+let crashBoomBuffer;         // heavy bass boom layer (explosion)
+let crashCarBuffer;          // real car crash sample
+let boostStartBuffer, boostLoopBuffer, boostEndBuffer;
+let screechBuffer;
+let crowdBuffer;
+let crowdSource, crowdGain;
+let masterGain;
+let lastCrashIndex = -1;
+let screechSource = null;
+let screechGainNode = null;
 let arenaProps = [];
 let botDamage = [];
 let botRespawnTimers = [];
@@ -673,140 +688,246 @@ function initParticles() {
 // ============================================================
 // AUDIO
 // ============================================================
-function initAudio() {
+async function loadAudioBuffer(url) {
+  const resp = await fetch(url);
+  const arrayBuf = await resp.arrayBuffer();
+  return audioCtx.decodeAudioData(arrayBuf);
+}
+
+async function initAudio() {
+  if (audioLoading) return;
+  audioLoading = true;
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  masterGain = audioCtx.createGain();
+  masterGain.gain.value = 0.8;
+  masterGain.connect(audioCtx.destination);
 
-  engineOsc1 = audioCtx.createOscillator();
-  engineOsc2 = audioCtx.createOscillator();
-  engineOsc1.type = 'sawtooth';
-  engineOsc2.type = 'sawtooth';
-  engineOsc1.frequency.value = 80;
-  engineOsc2.frequency.value = 82;
-
-  engineFilter = audioCtx.createBiquadFilter();
-  engineFilter.type = 'lowpass';
-  engineFilter.frequency.value = 400;
-  engineFilter.Q.value = 5;
-
-  engineGain = audioCtx.createGain();
-  engineGain.gain.value = 0;
-
-  const distortion = audioCtx.createWaveShaper();
-  const curve = new Float32Array(256);
-  for (let i = 0; i < 256; i++) {
-    const x = (i / 128) - 1;
-    curve[i] = (Math.PI + 20) * x / (Math.PI + 20 * Math.abs(x));
+  // Load engine loops (6 pitches — low to high RPM)
+  const enginePromises = [];
+  for (let i = 0; i < 6; i++) {
+    enginePromises.push(loadAudioBuffer(`assets/sounds/engine/engine_loop_${i}.wav`));
   }
-  distortion.curve = curve;
 
-  engineOsc1.connect(engineFilter);
-  engineOsc2.connect(engineFilter);
-  engineFilter.connect(distortion);
-  distortion.connect(engineGain);
-  engineGain.connect(audioCtx.destination);
+  // Load crash layers — metal crunches + bass boom + real car crash
+  const crashMetalFiles = [
+    'crash/bfh1_metal_hit_01.ogg', 'crash/bfh1_metal_hit_02.ogg',
+    'crash/bfh1_metal_hit_03.ogg', 'crash/bfh1_metal_hit_04.ogg',
+    'crash/bfh1_metal_hit_05.ogg', 'crash/bfh1_metal_hit_06.ogg',
+  ];
+  const crashMetalPromises = crashMetalFiles.map(f => loadAudioBuffer(`assets/sounds/${f}`));
+  const crashBoomP = loadAudioBuffer('assets/sounds/crash/explosion.wav');
+  const crashCarP = loadAudioBuffer('assets/sounds/crash/car-crash-sound-eefect.mp3');
 
-  engineOsc1.start();
-  engineOsc2.start();
+  // Load boost sounds (start / loop / end)
+  const boostStartP = loadAudioBuffer('assets/sounds/boost/boost-start.ogg');
+  const boostLoopP = loadAudioBuffer('assets/sounds/boost/boost-loop.ogg');
+  const boostEndP = loadAudioBuffer('assets/sounds/boost/boost-end.ogg');
 
-  // Crowd ambience — filtered noise with slow modulation
-  const crowdBufferSize = audioCtx.sampleRate * 4;
-  const crowdBuffer = audioCtx.createBuffer(1, crowdBufferSize, audioCtx.sampleRate);
-  const crowdData = crowdBuffer.getChannelData(0);
-  for (let i = 0; i < crowdBufferSize; i++) {
-    crowdData[i] = (Math.random() * 2 - 1) * 0.3;
+  // Load tire screech
+  const screechP = loadAudioBuffer('assets/sounds/screech/tire_screech.wav');
+
+  // Load crowd ambience
+  const crowdP = loadAudioBuffer('assets/sounds/crowd/ambience_cheering.mp3');
+
+  // Await all loads in parallel
+  const [engines, crashMetals, crashBoom, crashCar, bStart, bLoop, bEnd, screech, crowd] = await Promise.all([
+    Promise.all(enginePromises),
+    Promise.all(crashMetalPromises),
+    crashBoomP, crashCarP,
+    boostStartP, boostLoopP, boostEndP,
+    screechP, crowdP,
+  ]);
+
+  engineBuffers = engines;
+  crashMetalBuffers = crashMetals;
+  crashBoomBuffer = crashBoom;
+  crashCarBuffer = crashCar;
+  boostStartBuffer = bStart;
+  boostLoopBuffer = bLoop;
+  boostEndBuffer = bEnd;
+  screechBuffer = screech;
+  crowdBuffer = crowd;
+
+  // Start engine loops — all play simultaneously, volume-crossfaded by speed
+  for (let i = 0; i < engineBuffers.length; i++) {
+    const src = audioCtx.createBufferSource();
+    src.buffer = engineBuffers[i];
+    src.loop = true;
+    const gain = audioCtx.createGain();
+    gain.gain.value = i === 0 ? 0.15 : 0; // idle loop audible at start
+    src.connect(gain);
+    gain.connect(masterGain);
+    src.start();
+    engineSources.push(src);
+    engineGains.push(gain);
   }
-  const crowdSource = audioCtx.createBufferSource();
+
+  // Start crowd ambience loop
+  crowdSource = audioCtx.createBufferSource();
   crowdSource.buffer = crowdBuffer;
   crowdSource.loop = true;
-  const crowdFilter = audioCtx.createBiquadFilter();
-  crowdFilter.type = 'bandpass';
-  crowdFilter.frequency.value = 600;
-  crowdFilter.Q.value = 0.5;
-  const crowdGain = audioCtx.createGain();
-  crowdGain.gain.value = 0.06;
-  crowdSource.connect(crowdFilter);
-  crowdFilter.connect(crowdGain);
-  crowdGain.connect(audioCtx.destination);
+  crowdGain = audioCtx.createGain();
+  crowdGain.gain.value = 0.12;
+  crowdSource.connect(crowdGain);
+  crowdGain.connect(masterGain);
   crowdSource.start();
 
   audioStarted = true;
 }
 
 function updateEngineSound(speed, accelerating) {
-  if (!audioStarted) return;
+  if (!audioStarted || engineGains.length === 0) return;
+  const n = engineGains.length; // 6 loops
   const speedNorm = Math.min(Math.abs(speed) / 40, 1);
-  const baseFreq = 60 + speedNorm * 250;
-  engineOsc1.frequency.setTargetAtTime(baseFreq, audioCtx.currentTime, 0.1);
-  engineOsc2.frequency.setTargetAtTime(baseFreq * 1.01, audioCtx.currentTime, 0.1);
-  engineFilter.frequency.setTargetAtTime(300 + speedNorm * 2000, audioCtx.currentTime, 0.1);
-  const targetVol = accelerating ? 0.12 + speedNorm * 0.08 : 0.04 + speedNorm * 0.04;
-  engineGain.gain.setTargetAtTime(targetVol, audioCtx.currentTime, 0.1);
+  // Map speed to a float index across the 6 loops
+  const idx = speedNorm * (n - 1);
+  const baseVol = accelerating ? 0.22 : 0.10;
+  const t = audioCtx.currentTime;
+  for (let i = 0; i < n; i++) {
+    // Triangular crossfade — each loop peaks at its index, fades to neighbors
+    const dist = Math.abs(i - idx);
+    const vol = Math.max(0, 1 - dist) * baseVol;
+    engineGains[i].gain.setTargetAtTime(vol, t, 0.08);
+  }
 }
 
 function playCrashSound(intensity) {
   if (!audioStarted) return;
-  const bufferSize = audioCtx.sampleRate * 0.3;
-  const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
-  const data = buffer.getChannelData(0);
-  for (let i = 0; i < bufferSize; i++) {
-    const t = i / bufferSize;
-    data[i] = (Math.random() * 2 - 1) * Math.exp(-t * 8) * intensity;
+  const t = audioCtx.currentTime;
+  const vol = Math.min(intensity, 1);
+
+  // Layer 1: Synthesized sub-bass thump (the "weight" of the impact)
+  const bassOsc = audioCtx.createOscillator();
+  bassOsc.type = 'sine';
+  bassOsc.frequency.setValueAtTime(60 + intensity * 30, t);
+  bassOsc.frequency.exponentialRampToValueAtTime(20, t + 0.3);
+  const bassGain = audioCtx.createGain();
+  bassGain.gain.setValueAtTime(vol * 0.5, t);
+  bassGain.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+  bassOsc.connect(bassGain);
+  bassGain.connect(masterGain);
+  bassOsc.start(t);
+  bassOsc.stop(t + 0.4);
+
+  // Layer 2: Metal crunch sample (random from pool)
+  if (crashMetalBuffers.length > 0) {
+    let idx;
+    do { idx = Math.floor(Math.random() * crashMetalBuffers.length); }
+    while (idx === lastCrashIndex && crashMetalBuffers.length > 1);
+    lastCrashIndex = idx;
+    const metalSrc = audioCtx.createBufferSource();
+    metalSrc.buffer = crashMetalBuffers[idx];
+    metalSrc.playbackRate.value = 0.7 + Math.random() * 0.4;
+    const metalGain = audioCtx.createGain();
+    metalGain.gain.value = vol * 0.45;
+    metalSrc.connect(metalGain);
+    metalGain.connect(masterGain);
+    metalSrc.start(t);
   }
-  const source = audioCtx.createBufferSource();
-  source.buffer = buffer;
-  const filter = audioCtx.createBiquadFilter();
-  filter.type = 'lowpass';
-  filter.frequency.value = intensity > 0.7 ? 3000 : 1500;
-  const gain = audioCtx.createGain();
-  gain.gain.value = Math.min(intensity * 0.5, 0.4);
-  source.connect(filter);
-  filter.connect(gain);
-  gain.connect(audioCtx.destination);
-  source.start();
+
+  // Layer 3: For heavy hits, add the real car crash sample or explosion boom
+  if (intensity > 0.5 && crashBoomBuffer) {
+    const boomSrc = audioCtx.createBufferSource();
+    boomSrc.buffer = intensity > 0.8 && crashCarBuffer ? crashCarBuffer : crashBoomBuffer;
+    boomSrc.playbackRate.value = 0.8 + Math.random() * 0.3;
+    const boomGain = audioCtx.createGain();
+    boomGain.gain.value = (vol - 0.3) * 0.4;
+    boomSrc.connect(boomGain);
+    boomGain.connect(masterGain);
+    boomSrc.start(t);
+  }
 }
 
 function playBoostSound() {
   if (!audioStarted) return;
-  const bufferSize = audioCtx.sampleRate * 0.5;
-  const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
-  const data = buffer.getChannelData(0);
-  for (let i = 0; i < bufferSize; i++) {
-    const t = i / bufferSize;
-    data[i] = (Math.random() * 2 - 1) * Math.sin(t * Math.PI) * 0.3;
+  const t = audioCtx.currentTime;
+
+  // Layer 1: Synthesized rising whoosh (filtered noise sweep)
+  const whooshSize = audioCtx.sampleRate * 0.8;
+  const whooshBuf = audioCtx.createBuffer(1, whooshSize, audioCtx.sampleRate);
+  const whooshData = whooshBuf.getChannelData(0);
+  for (let i = 0; i < whooshSize; i++) {
+    const p = i / whooshSize;
+    whooshData[i] = (Math.random() * 2 - 1) * Math.sin(p * Math.PI) * 0.5;
   }
-  const source = audioCtx.createBufferSource();
-  source.buffer = buffer;
-  const filter = audioCtx.createBiquadFilter();
-  filter.type = 'bandpass';
-  filter.frequency.value = 800;
-  filter.Q.value = 2;
-  filter.frequency.setValueAtTime(400, audioCtx.currentTime);
-  filter.frequency.linearRampToValueAtTime(2000, audioCtx.currentTime + 0.5);
-  const gain = audioCtx.createGain();
-  gain.gain.value = 0.3;
-  source.connect(filter);
-  filter.connect(gain);
-  gain.connect(audioCtx.destination);
-  source.start();
+  const whooshSrc = audioCtx.createBufferSource();
+  whooshSrc.buffer = whooshBuf;
+  const whooshFilter = audioCtx.createBiquadFilter();
+  whooshFilter.type = 'bandpass';
+  whooshFilter.Q.value = 3;
+  whooshFilter.frequency.setValueAtTime(200, t);
+  whooshFilter.frequency.exponentialRampToValueAtTime(3000, t + 0.6);
+  const whooshGain = audioCtx.createGain();
+  whooshGain.gain.value = 0.3;
+  whooshSrc.connect(whooshFilter);
+  whooshFilter.connect(whooshGain);
+  whooshGain.connect(masterGain);
+  whooshSrc.start(t);
+
+  // Layer 2: Sample-based boost (start → loop → end)
+  if (boostStartBuffer) {
+    const sampleGain = audioCtx.createGain();
+    sampleGain.gain.value = 0.35;
+    sampleGain.connect(masterGain);
+
+    const startSrc = audioCtx.createBufferSource();
+    startSrc.buffer = boostStartBuffer;
+    startSrc.connect(sampleGain);
+    startSrc.start(t);
+
+    if (boostLoopBuffer) {
+      const loopSrc = audioCtx.createBufferSource();
+      loopSrc.buffer = boostLoopBuffer;
+      loopSrc.loop = true;
+      loopSrc.connect(sampleGain);
+      const startDur = boostStartBuffer.duration;
+      loopSrc.start(t + startDur);
+      loopSrc.stop(t + startDur + 0.5);
+
+      if (boostEndBuffer) {
+        const endSrc = audioCtx.createBufferSource();
+        endSrc.buffer = boostEndBuffer;
+        endSrc.connect(sampleGain);
+        endSrc.start(t + startDur + 0.5);
+      }
+    }
+  }
 }
 
 function playScreechSound(intensity) {
-  if (!audioStarted) return;
-  const osc = audioCtx.createOscillator();
-  osc.type = 'sawtooth';
-  osc.frequency.value = 800 + Math.random() * 400;
-  const filter = audioCtx.createBiquadFilter();
-  filter.type = 'bandpass';
-  filter.frequency.value = 2000;
-  filter.Q.value = 10;
-  const gain = audioCtx.createGain();
-  gain.gain.setValueAtTime(intensity * 0.06, audioCtx.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
-  osc.connect(filter);
-  filter.connect(gain);
-  gain.connect(audioCtx.destination);
-  osc.start();
-  osc.stop(audioCtx.currentTime + 0.3);
+  if (!audioStarted || !screechBuffer) return;
+  const vol = Math.min(intensity * 0.05, 0.10);
+  // If already screeching, just adjust volume smoothly
+  if (screechSource && screechGainNode) {
+    screechGainNode.gain.setTargetAtTime(vol, audioCtx.currentTime, 0.05);
+    return;
+  }
+  screechSource = audioCtx.createBufferSource();
+  screechSource.buffer = screechBuffer;
+  screechSource.loop = true;
+  // Vary pitch so it doesn't sound identical every turn
+  screechSource.playbackRate.value = 0.9 + Math.random() * 0.3;
+  // Add a filter to tame harsh highs
+  const screechFilter = audioCtx.createBiquadFilter();
+  screechFilter.type = 'lowpass';
+  screechFilter.frequency.value = 4000;
+  screechGainNode = audioCtx.createGain();
+  screechGainNode.gain.value = vol;
+  screechSource.connect(screechFilter);
+  screechFilter.connect(screechGainNode);
+  screechGainNode.connect(masterGain);
+  screechSource.start();
+  screechSource.onended = () => { screechSource = null; screechGainNode = null; };
+}
+
+function stopScreechSound() {
+  if (screechSource && screechGainNode) {
+    screechGainNode.gain.setTargetAtTime(0, audioCtx.currentTime, 0.05);
+    const src = screechSource;
+    setTimeout(() => { try { src.stop(); } catch(e) {} }, 100);
+    screechSource = null;
+    screechGainNode = null;
+  }
 }
 
 // ============================================================
@@ -816,12 +937,12 @@ function initControls() {
   window.addEventListener('keydown', e => {
     keys[e.key.toLowerCase()] = true;
     if (e.key === ' ') e.preventDefault();
-    if (!audioStarted) initAudio();
+    if (!audioStarted && !audioLoading) initAudio();
     if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
   });
   window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
   window.addEventListener('click', () => {
-    if (!audioStarted) initAudio();
+    if (!audioStarted && !audioLoading) initAudio();
     if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
   });
 }
@@ -1381,6 +1502,8 @@ function updatePlayer(dt) {
   // Tire screech
   if (Math.abs(steerValue) > 0.3 && speed > 10) {
     playScreechSound(Math.abs(steerValue) * speed / 30);
+  } else {
+    stopScreechSound();
   }
 
   // Dust
