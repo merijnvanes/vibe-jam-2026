@@ -189,7 +189,7 @@ function initPhysics() {
 
   const wallMat = new CANNON.Material('wall');
   world.addContactMaterial(new CANNON.ContactMaterial(carMat, wallMat, {
-    friction: 0.5, restitution: 0.5,
+    friction: 0.1, restitution: 0.6,
   }));
 
   return { carMat, wallMat, groundMat };
@@ -952,23 +952,45 @@ function respawnBot(index) {
 function setupCollisions() {
   world.addEventListener('beginContact', (event) => {
     const { bodyA, bodyB } = event;
+
+    // Calculate collision normal from body positions
+    const collisionNormal = new CANNON.Vec3();
+    bodyB.position.vsub(bodyA.position, collisionNormal);
+    collisionNormal.y = 0; // ignore vertical component
+    const dist = collisionNormal.length();
+    if (dist > 0) collisionNormal.scale(1 / dist, collisionNormal);
+
+    // Project relative velocity onto collision normal — this is the TRUE impact severity
     const relVel = new CANNON.Vec3();
     bodyA.velocity.vsub(bodyB.velocity, relVel);
-    const impactSpeed = relVel.length();
-    if (impactSpeed < 6) return;
+    const normalImpact = Math.abs(relVel.dot(collisionNormal));
 
-    const intensity = Math.min(impactSpeed / 25, 1);
+    // Thresholds based on normal impact speed (m/s)
+    // < 3: ignore (gentle brush, sliding along wall)
+    // 3-8: light bump (small sparks only)
+    // 8-15: solid hit (sparks, debris, light damage, sound)
+    // 15+: heavy crash (full effects, heavy damage, knockback)
+    if (normalImpact < 3) return;
+
+    const intensity = Math.min((normalImpact - 3) / 20, 1);
     const contactPoint = new THREE.Vector3(
       (bodyA.position.x + bodyB.position.x) / 2,
       (bodyA.position.y + bodyB.position.y) / 2,
       (bodyA.position.z + bodyB.position.z) / 2,
     );
+    const normal = new THREE.Vector3(collisionNormal.x, 0.5, collisionNormal.z).normalize();
 
-    const normal = new THREE.Vector3(
-      bodyA.position.x - bodyB.position.x, 0.5,
-      bodyA.position.z - bodyB.position.z
-    ).normalize();
+    // Light bump — just a few sparks
+    if (normalImpact < 8) {
+      sparkPool.emit(contactPoint,
+        { x: normal.x * 5, y: 3, z: normal.z * 5 },
+        0.15, Math.floor(intensity * 8) + 2
+      );
+      if (normalImpact > 5) playCrashSound(intensity * 0.4);
+      return;
+    }
 
+    // Solid hit and above — full effects
     sparkPool.emit(contactPoint,
       { x: normal.x * 10, y: 5 + Math.random() * 5, z: normal.z * 10 },
       0.2 + Math.random() * 0.2, Math.floor(intensity * 20) + 5
@@ -978,29 +1000,25 @@ function setupCollisions() {
       0.5 + Math.random() * 0.3, Math.floor(intensity * 8)
     );
 
+    // Damage — only from solid hits
     if (bodyA === playerChassis || bodyB === playerChassis) {
-      cameraShakeIntensity = Math.max(cameraShakeIntensity, intensity * 1.5);
-      playerDamage += impactSpeed > DAMAGE_THRESHOLD_HEAVY ? 2 : 1;
+      cameraShakeIntensity = Math.max(cameraShakeIntensity, intensity * 1.2);
+      playerDamage += normalImpact > DAMAGE_THRESHOLD_HEAVY ? 2 : 1;
       checkPlayerDamageState();
     }
 
     for (let i = 0; i < botVehicles.length; i++) {
       if (bodyA === botVehicles[i].chassisBody || bodyB === botVehicles[i].chassisBody) {
-        botDamage[i] += impactSpeed > DAMAGE_THRESHOLD_HEAVY ? 2 : 1;
+        botDamage[i] += normalImpact > DAMAGE_THRESHOLD_HEAVY ? 2 : 1;
         checkBotDamageState(i);
       }
     }
 
-    // Extra knockback for satisfying demolition feel
-    if (impactSpeed > 8) {
-      const knockbackDir = new CANNON.Vec3(
-        bodyB.position.x - bodyA.position.x, 0.3,
-        bodyB.position.z - bodyA.position.z
-      );
-      knockbackDir.normalize();
-      const knockForce = impactSpeed * 12;
-      if (bodyB.mass > 0) bodyB.applyImpulse(knockbackDir.scale(knockForce));
-      if (bodyA.mass > 0) bodyA.applyImpulse(knockbackDir.scale(-knockForce));
+    // Knockback only on heavy crashes
+    if (normalImpact > 12) {
+      const knockForce = (normalImpact - 12) * 8;
+      if (bodyB.mass > 0) bodyB.applyImpulse(collisionNormal.scale(knockForce));
+      if (bodyA.mass > 0) bodyA.applyImpulse(collisionNormal.scale(-knockForce));
     }
 
     playCrashSound(intensity);
@@ -1308,20 +1326,20 @@ function updatePlayer(dt) {
     }
   }
 
-  // Align velocity with car heading — prevents drifty/slidey feel
-  // Decompose velocity into forward and lateral components
-  const velForward = forwardSpeed;
+  // Gradually align velocity with car heading — tire grip pulls car straight
+  // but allows bounces and slides to play out naturally
   const right = playerChassis.quaternion.vmult(new CANNON.Vec3(1, 0, 0));
   const lateralSpeed = right.x * vel.x + right.z * vel.z;
-  // Kill most lateral velocity (keep ~15% for slight slide feel)
-  const lateralGrip = 0.85;
-  vel.x -= right.x * lateralSpeed * lateralGrip;
-  vel.z -= right.z * lateralSpeed * lateralGrip;
+  // Grip builds over time: ~3 per second decay rate — enough to prevent drifting
+  // but slow enough that wall bounces and collision physics feel natural
+  const gripRate = 1 - Math.pow(0.05, dt); // ~95% lateral killed per second, but gradual
+  vel.x -= right.x * lateralSpeed * gripRate;
+  vel.z -= right.z * lateralSpeed * gripRate;
 
   // Natural deceleration when not pressing gas
   if (!accelerating && !braking) {
-    vel.x *= Math.pow(0.3, dt);
-    vel.z *= Math.pow(0.3, dt);
+    vel.x *= Math.pow(0.6, dt);
+    vel.z *= Math.pow(0.6, dt);
   }
 
   // Minimal engine force — just enough for wheel spin visual, not enough to cause pitch torque
@@ -1477,21 +1495,6 @@ function animate() {
   // Anti-flip for all vehicles
   preventFlip(playerChassis);
   for (let i = 0; i < botVehicles.length; i++) preventFlip(botVehicles[i].chassisBody);
-
-  // Bounds check — keep all cars in arena
-  const bound = ARENA_SIZE - 2;
-  function clampToArena(body) {
-    if (Math.abs(body.position.x) > bound) {
-      body.position.x = Math.sign(body.position.x) * bound;
-      body.velocity.x *= -0.5;
-    }
-    if (Math.abs(body.position.z) > bound) {
-      body.position.z = Math.sign(body.position.z) * bound;
-      body.velocity.z *= -0.5;
-    }
-  }
-  clampToArena(playerChassis);
-  for (let i = 0; i < botVehicles.length; i++) clampToArena(botVehicles[i].chassisBody);
 
   updatePlayer(dt);
   for (let i = 0; i < NUM_BOTS; i++) updateBot(i, dt);
