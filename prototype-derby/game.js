@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import * as CANNON from 'cannon-es';
+import RAPIER from '@dimforge/rapier3d-compat';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
@@ -14,13 +14,9 @@ const WALL_HEIGHT = 6;
 const WALL_THICKNESS = 2;
 const NUM_BOTS = 8;
 const CAR_MASS = 150;
-const CAR_HALF_EXTENTS = new CANNON.Vec3(1.0, 0.45, 2.1);
-const MAX_ENGINE_FORCE = 1500;
+const MAX_ENGINE_FORCE = 800;
 const MAX_SPEED = 33; // m/s (~120 km/h)
-const ACCELERATION = 22; // m/s² — punchy arcade feel
-const BRAKE_DECEL = 25;
 const MAX_STEER = 0.4;
-const BRAKE_FORCE = 50;
 const BOOST_IMPULSE = 500;
 const BOOST_COOLDOWN = 3.0;
 const RESPAWN_DELAY = 2.0;
@@ -30,8 +26,9 @@ const DAMAGE_THRESHOLD_HEAVY = 15;
 // GLOBALS
 // ============================================================
 let scene, camera, renderer, composer, clock;
-let world, groundBody;
-let playerVehicle, playerChassis, playerMesh;
+let world, eventQueue;
+let playerVehicleController, playerChassis, playerMesh;
+let playerWheelMeshes = [];
 let botVehicles = [];
 let carModel = null;
 let keys = {};
@@ -66,6 +63,9 @@ let arenaProps = [];
 let botDamage = [];
 let botRespawnTimers = [];
 let botWrecked = [];
+
+// Map collider handles to body references for collision lookup
+let colliderToVehicle = new Map(); // handle -> { type: 'player' } | { type: 'bot', index }
 
 // HUD elements
 let speedValueEl, boostFillEl, scoreEl, healthFillEl;
@@ -177,43 +177,52 @@ function initScene() {
 // ============================================================
 // PHYSICS WORLD
 // ============================================================
-function initPhysics() {
-  world = new CANNON.World();
-  world.gravity.set(0, -10, 0);
-  world.broadphase = new CANNON.SAPBroadphase(world);
-  const solver = new CANNON.GSSolver();
-  solver.iterations = 10;
-  solver.tolerance = 0.01;
-  world.solver = new CANNON.SplitSolver(solver);
-  world.defaultContactMaterial.friction = 0.3;
-  world.defaultContactMaterial.restitution = 0.4;
+async function initPhysics() {
+  await RAPIER.init();
+  world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
+  eventQueue = new RAPIER.EventQueue(true);
 
-  const groundMat = new CANNON.Material('ground');
-  groundBody = new CANNON.Body({ mass: 0, material: groundMat });
-  groundBody.addShape(new CANNON.Plane());
-  groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
-  world.addBody(groundBody);
+  // Ground — flat cuboid
+  const groundBody = world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
+  world.createCollider(
+    RAPIER.ColliderDesc.cuboid(ARENA_SIZE, 0.25, ARENA_SIZE)
+      .setTranslation(0, -0.25, 0)
+      .setFriction(0.8)
+      .setRestitution(0.1),
+    groundBody
+  );
 
-  const carMat = new CANNON.Material('car');
-  world.addContactMaterial(new CANNON.ContactMaterial(carMat, groundMat, {
-    friction: 0.5, restitution: 0.1,
-  }));
-  world.addContactMaterial(new CANNON.ContactMaterial(carMat, carMat, {
-    friction: 0.3, restitution: 0.6,
-  }));
-
-  const wallMat = new CANNON.Material('wall');
-  world.addContactMaterial(new CANNON.ContactMaterial(carMat, wallMat, {
-    friction: 0.1, restitution: 0.6,
-  }));
-
-  return { carMat, wallMat, groundMat };
+  // Heightfield with subtle noise for bumps
+  const rows = 64;
+  const cols = 64;
+  const heights = new Float32Array((rows + 1) * (cols + 1));
+  for (let i = 0; i <= rows; i++) {
+    for (let j = 0; j <= cols; j++) {
+      const x = (j / cols - 0.5) * ARENA_SIZE * 2;
+      const z = (i / rows - 0.5) * ARENA_SIZE * 2;
+      // Simple noise approximation
+      heights[i * (cols + 1) + j] =
+        Math.sin(x * 0.3) * Math.cos(z * 0.2) * 0.06 +
+        Math.sin(x * 0.7 + z * 0.5) * 0.04;
+    }
+  }
+  const heightBody = world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
+  world.createCollider(
+    RAPIER.ColliderDesc.heightfield(
+      rows, cols, heights,
+      { x: ARENA_SIZE * 2, y: 1, z: ARENA_SIZE * 2 }
+    )
+      .setTranslation(0, 0.0, 0)
+      .setFriction(0.8)
+      .setRestitution(0.1),
+    heightBody
+  );
 }
 
 // ============================================================
 // ARENA
 // ============================================================
-function createArena(wallMat) {
+function createArena() {
   // Ground plane
   const groundGeo = new THREE.PlaneGeometry(ARENA_SIZE * 2, ARENA_SIZE * 2, 64, 64);
   const colors = new Float32Array(groundGeo.attributes.position.count * 3);
@@ -244,10 +253,14 @@ function createArena(wallMat) {
   ];
 
   wallPositions.forEach(w => {
-    const wallBody = new CANNON.Body({ mass: 0, material: wallMat });
-    wallBody.addShape(new CANNON.Box(new CANNON.Vec3(w.sx / 2, w.sy / 2, w.sz / 2)));
-    wallBody.position.set(w.x, w.sy / 2, w.z);
-    world.addBody(wallBody);
+    const wallBody = world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
+    world.createCollider(
+      RAPIER.ColliderDesc.cuboid(w.sx / 2, w.sy / 2, w.sz / 2)
+        .setTranslation(w.x, w.sy / 2, w.z)
+        .setFriction(0.1)
+        .setRestitution(0.3),
+      wallBody
+    );
 
     const wallMesh = new THREE.Mesh(
       new THREE.BoxGeometry(w.sx, w.sy, w.sz),
@@ -279,7 +292,7 @@ function createArena(wallMat) {
     scene.add(pylon);
   });
 
-  createArenaProps(wallMat);
+  createArenaProps();
 }
 
 function addGroundDetails() {
@@ -319,7 +332,7 @@ function addGroundDetails() {
   }
 }
 
-function createArenaProps(wallMat) {
+function createArenaProps() {
   // Tire stacks
   const tirePositions = [
     { x: -20, z: -20 }, { x: 20, z: -20 }, { x: -20, z: 20 }, { x: 20, z: 20 },
@@ -341,15 +354,23 @@ function createArenaProps(wallMat) {
       tire.receiveShadow = true;
       tireGroup.add(tire);
     }
-    tireGroup.position.set(pos.x, (numTires * 0.5 + 0.5) / 2, pos.z);
+    const tireHeight = numTires * 0.5 + 0.5;
+    tireGroup.position.set(pos.x, tireHeight / 2, pos.z);
     scene.add(tireGroup);
 
-    const tireBody = new CANNON.Body({ mass: 5, material: wallMat });
-    tireBody.addShape(new CANNON.Cylinder(0.7, 0.7, numTires * 0.5 + 0.5, 8));
-    tireBody.position.set(pos.x, (numTires * 0.5 + 0.5) / 2, pos.z);
-    tireBody.linearDamping = 0.5;
-    tireBody.angularDamping = 0.5;
-    world.addBody(tireBody);
+    const tireBody = world.createRigidBody(
+      RAPIER.RigidBodyDesc.dynamic()
+        .setTranslation(pos.x, tireHeight / 2, pos.z)
+        .setLinearDamping(0.5)
+        .setAngularDamping(0.5)
+    );
+    world.createCollider(
+      RAPIER.ColliderDesc.cylinder(tireHeight / 2, 0.7)
+        .setMass(5)
+        .setFriction(0.3)
+        .setRestitution(0.4),
+      tireBody
+    );
     arenaProps.push({ body: tireBody, mesh: tireGroup });
   });
 
@@ -373,12 +394,19 @@ function createArenaProps(wallMat) {
     barrelMesh.receiveShadow = true;
     scene.add(barrelMesh);
 
-    const barrelBody = new CANNON.Body({ mass: 10, material: wallMat });
-    barrelBody.addShape(new CANNON.Cylinder(0.5, 0.5, 1.2, 12));
-    barrelBody.position.set(pos.x, 0.6, pos.z);
-    barrelBody.linearDamping = 0.3;
-    barrelBody.angularDamping = 0.3;
-    world.addBody(barrelBody);
+    const barrelBody = world.createRigidBody(
+      RAPIER.RigidBodyDesc.dynamic()
+        .setTranslation(pos.x, 0.6, pos.z)
+        .setLinearDamping(0.3)
+        .setAngularDamping(0.3)
+    );
+    world.createCollider(
+      RAPIER.ColliderDesc.cylinder(0.6, 0.5)
+        .setMass(10)
+        .setFriction(0.3)
+        .setRestitution(0.6),
+      barrelBody
+    );
     arenaProps.push({ body: barrelBody, mesh: barrelMesh });
   });
 
@@ -395,12 +423,18 @@ function createArenaProps(wallMat) {
   rampMesh.receiveShadow = true;
   scene.add(rampMesh);
 
-  // Ramp physics — angled box
-  const rampBody = new CANNON.Body({ mass: 0, material: wallMat });
-  rampBody.addShape(new CANNON.Box(new CANNON.Vec3(rampWidth / 2, 0.15, rampLength / 2)));
-  rampBody.position.set(12, rampHeight / 2, 12);
-  rampBody.quaternion.setFromEuler(Math.atan2(rampHeight, rampLength), 0, 0);
-  world.addBody(rampBody);
+  // Ramp physics — angled static collider
+  const rampAngle = Math.atan2(rampHeight, rampLength);
+  const rampBody = world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
+  const rampQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(rampAngle, 0, 0));
+  world.createCollider(
+    RAPIER.ColliderDesc.cuboid(rampWidth / 2, 0.15, rampLength / 2)
+      .setTranslation(12, rampHeight / 2, 12)
+      .setRotation({ x: rampQ.x, y: rampQ.y, z: rampQ.z, w: rampQ.w })
+      .setFriction(0.5)
+      .setRestitution(0.1),
+    rampBody
+  );
 
   // Second ramp on opposite side
   const rampMesh2 = rampMesh.clone();
@@ -409,13 +443,16 @@ function createArenaProps(wallMat) {
   rampMesh2.rotation.y = Math.PI;
   scene.add(rampMesh2);
 
-  const rampBody2 = new CANNON.Body({ mass: 0, material: wallMat });
-  rampBody2.addShape(new CANNON.Box(new CANNON.Vec3(rampWidth / 2, 0.15, rampLength / 2)));
-  rampBody2.position.set(-12, rampHeight / 2, -12);
-  const rampQ2 = new CANNON.Quaternion();
-  rampQ2.setFromEuler(Math.atan2(rampHeight, rampLength), Math.PI, 0);
-  rampBody2.quaternion.copy(rampQ2);
-  world.addBody(rampBody2);
+  const rampBody2 = world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
+  const rampQ2 = new THREE.Quaternion().setFromEuler(new THREE.Euler(rampAngle, Math.PI, 0));
+  world.createCollider(
+    RAPIER.ColliderDesc.cuboid(rampWidth / 2, 0.15, rampLength / 2)
+      .setTranslation(-12, rampHeight / 2, -12)
+      .setRotation({ x: rampQ2.x, y: rampQ2.y, z: rampQ2.z, w: rampQ2.w })
+      .setFriction(0.5)
+      .setRestitution(0.1),
+    rampBody2
+  );
 
   // Warning stripes on ramps
   const stripeGeo = new THREE.PlaneGeometry(rampWidth - 0.5, 0.3);
@@ -433,46 +470,76 @@ function createArenaProps(wallMat) {
 // ============================================================
 // CAR CREATION
 // ============================================================
-function createVehicle(position, carMat) {
-  const chassisShape = new CANNON.Box(CAR_HALF_EXTENTS);
-  const chassisBody = new CANNON.Body({ mass: CAR_MASS, material: carMat });
-  chassisBody.addShape(chassisShape, new CANNON.Vec3(0, -0.3, 0));
-  chassisBody.position.copy(position);
-  chassisBody.angularDamping = 0.7;
-  chassisBody.linearDamping = 0.05;
+function createVehicle(x, y, z) {
+  // Chassis rigid body
+  const chassisDesc = RAPIER.RigidBodyDesc.dynamic()
+    .setTranslation(x, y, z)
+    .setCcdEnabled(true)
+    .setLinearDamping(0.05)
+    .setAngularDamping(0.7);
+  const chassis = world.createRigidBody(chassisDesc);
 
-  const vehicle = new CANNON.RaycastVehicle({
-    chassisBody,
-    indexRightAxis: 0,
-    indexForwardAxis: 2,
-    indexUpAxis: 1,
-  });
+  const chassisCollider = world.createCollider(
+    RAPIER.ColliderDesc.cuboid(1.0, 0.45, 2.1)
+      .setMass(CAR_MASS)
+      .setFriction(0.5)
+      .setRestitution(0.25)
+      .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS),
+    chassis
+  );
 
-  const wheelOpts = {
-    radius: 0.4,
-    directionLocal: new CANNON.Vec3(0, -1, 0),
-    suspensionStiffness: 200,
-    suspensionRestLength: 0.35,
-    frictionSlip: 5.0,
-    dampingRelaxation: 4.0,
-    dampingCompression: 6.0,
-    maxSuspensionForce: 100000,
-    rollInfluence: 0.05,
-    axleLocal: new CANNON.Vec3(1, 0, 0),
-    maxSuspensionTravel: 0.4,
-    customSlidingRotationalSpeed: -30,
-    useCustomSlidingRotationalSpeed: true,
-  };
+  // Lower center of mass for stability (no anti-flip hacks)
+  chassisCollider.setMassProperties(
+    CAR_MASS,
+    { x: 0, y: -0.3, z: 0 },       // center of mass — lowered
+    { x: 50, y: 20, z: 80 },         // principal inertia
+    { x: 0, y: 0, z: 0, w: 1 }      // inertia rotation
+  );
 
-  // Front wheels (steering) — at -Z end (car faces -Z)
-  vehicle.addWheel({ ...wheelOpts, chassisConnectionPointLocal: new CANNON.Vec3(-0.85, -0.1, -1.3) });
-  vehicle.addWheel({ ...wheelOpts, chassisConnectionPointLocal: new CANNON.Vec3(0.85, -0.1, -1.3) });
-  // Rear wheels (drive) — at +Z end (behind the car) — more grip than front for stability
-  vehicle.addWheel({ ...wheelOpts, chassisConnectionPointLocal: new CANNON.Vec3(-0.9, -0.1, 1.4), frictionSlip: 5.5 });
-  vehicle.addWheel({ ...wheelOpts, chassisConnectionPointLocal: new CANNON.Vec3(0.9, -0.1, 1.4), frictionSlip: 5.5 });
+  // Vehicle controller
+  const vc = world.createVehicleController(chassis);
 
-  vehicle.addToWorld(world);
+  // Front wheels at -Z (car faces -Z)
+  vc.addWheel(
+    { x: -0.85, y: -0.1, z: -1.3 },  // chassisConnectionCs
+    { x: 0, y: -1, z: 0 },            // directionCs (suspension)
+    { x: -1, y: 0, z: 0 },            // axleCs
+    0.6,                                // suspensionRestLength
+    0.4                                 // radius
+  );
+  vc.addWheel(
+    { x: 0.85, y: -0.1, z: -1.3 },
+    { x: 0, y: -1, z: 0 },
+    { x: -1, y: 0, z: 0 },
+    0.6,
+    0.4
+  );
+  // Rear wheels at +Z
+  vc.addWheel(
+    { x: -0.9, y: -0.1, z: 1.4 },
+    { x: 0, y: -1, z: 0 },
+    { x: -1, y: 0, z: 0 },
+    0.6,
+    0.4
+  );
+  vc.addWheel(
+    { x: 0.9, y: -0.1, z: 1.4 },
+    { x: 0, y: -1, z: 0 },
+    { x: -1, y: 0, z: 0 },
+    0.6,
+    0.4
+  );
 
+  // Suspension tuning
+  for (let i = 0; i < 4; i++) {
+    vc.setWheelSuspensionStiffness(i, 24.0);
+    vc.setWheelSuspensionCompression(i, 4.4);
+    vc.setWheelSuspensionRelaxation(i, 2.3);
+    vc.setWheelMaxSuspensionTravel(i, 0.4);
+    vc.setWheelFrictionSlip(i, 5.0);
+  }
+
+  // Wheel meshes
   const wheelMeshes = [];
   for (let i = 0; i < 4; i++) {
     const wheelGeo = new THREE.CylinderGeometry(0.4, 0.4, 0.3, 16);
@@ -485,7 +552,7 @@ function createVehicle(position, carMat) {
     wheelMeshes.push(wheelMesh);
   }
 
-  return { vehicle, chassisBody, wheelMeshes };
+  return { vehicleController: vc, chassis, chassisCollider, wheelMeshes };
 }
 
 function createCarMesh(color) {
@@ -864,7 +931,7 @@ function playBoostSound() {
   whooshGain.connect(masterGain);
   whooshSrc.start(t);
 
-  // Layer 2: Sample-based boost (start → loop → end)
+  // Layer 2: Sample-based boost (start -> loop -> end)
   if (boostStartBuffer) {
     const sampleGain = audioCtx.createGain();
     sampleGain.gain.value = 0.35;
@@ -948,6 +1015,22 @@ function initControls() {
 }
 
 // ============================================================
+// HELPER: get forward direction from a Rapier rigid body
+// ============================================================
+function getForwardDir(chassis) {
+  const rot = chassis.rotation();
+  const q = new THREE.Quaternion(rot.x, rot.y, rot.z, rot.w);
+  const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(q);
+  return fwd;
+}
+
+function getRightDir(chassis) {
+  const rot = chassis.rotation();
+  const q = new THREE.Quaternion(rot.x, rot.y, rot.z, rot.w);
+  return new THREE.Vector3(1, 0, 0).applyQuaternion(q);
+}
+
+// ============================================================
 // AI BOT LOGIC
 // ============================================================
 function updateBot(index, dt) {
@@ -960,49 +1043,52 @@ function updateBot(index, dt) {
     return;
   }
 
-  const pos = bot.chassisBody.position;
-  const vel = bot.chassisBody.velocity;
+  const pos = bot.chassis.translation();
+  const vel = bot.chassis.linvel();
   const speed = Math.sqrt(vel.x * vel.x + vel.z * vel.z);
 
   // Find nearest target
   let nearestDist = Infinity;
-  let targetPos = new CANNON.Vec3(0, 0, 0);
+  let targetPos = { x: 0, y: 0, z: 0 };
 
   if (!playerWrecked) {
-    const dx = playerChassis.position.x - pos.x;
-    const dz = playerChassis.position.z - pos.z;
+    const pp = playerChassis.translation();
+    const dx = pp.x - pos.x;
+    const dz = pp.z - pos.z;
     const d = dx * dx + dz * dz;
     if (d < nearestDist) {
       nearestDist = d;
-      targetPos.copy(playerChassis.position);
+      targetPos = { x: pp.x, y: pp.y, z: pp.z };
     }
   }
 
   for (let j = 0; j < botVehicles.length; j++) {
     if (j === index || botWrecked[j]) continue;
-    const op = botVehicles[j].chassisBody.position;
+    const op = botVehicles[j].chassis.translation();
     const dx = op.x - pos.x;
     const dz = op.z - pos.z;
     const d = dx * dx + dz * dz;
     if (d < nearestDist) {
       nearestDist = d;
-      targetPos.copy(op);
+      targetPos = { x: op.x, y: op.y, z: op.z };
     }
   }
 
   // Bias toward center when far out
   if (Math.sqrt(pos.x * pos.x + pos.z * pos.z) > ARENA_SIZE * 0.6) {
-    targetPos.set(0, 0, 0);
+    targetPos = { x: 0, y: 0, z: 0 };
   }
 
-  // Steering — forward is -Z in local space (RaycastVehicle convention)
-  const forward = new CANNON.Vec3(0, 0, -1);
-  const worldForward = bot.chassisBody.quaternion.vmult(forward);
-  const toTarget = new CANNON.Vec3(targetPos.x - pos.x, 0, targetPos.z - pos.z);
-  toTarget.normalize();
+  // Steering — forward is -Z in local space
+  const worldForward = getForwardDir(bot.chassis);
+  const toTargetX = targetPos.x - pos.x;
+  const toTargetZ = targetPos.z - pos.z;
+  const toTargetLen = Math.sqrt(toTargetX * toTargetX + toTargetZ * toTargetZ) || 1;
+  const toTargetNX = toTargetX / toTargetLen;
+  const toTargetNZ = toTargetZ / toTargetLen;
 
-  const cross = worldForward.x * toTarget.z - worldForward.z * toTarget.x;
-  const dot = worldForward.x * toTarget.x + worldForward.z * toTarget.z;
+  const cross = worldForward.x * toTargetNZ - worldForward.z * toTargetNX;
+  const dot = worldForward.x * toTargetNX + worldForward.z * toTargetNZ;
 
   let steerValue = Math.max(-MAX_STEER, Math.min(MAX_STEER, -cross * 2.5));
 
@@ -1013,25 +1099,26 @@ function updateBot(index, dt) {
   if (pos.z > wallMargin) steerValue -= Math.sign(worldForward.x) * 0.3;
   if (pos.z < -wallMargin) steerValue += Math.sign(worldForward.x) * 0.3;
 
-  // Direct velocity control for bots (same arcade approach as player)
-  const botFwd = bot.chassisBody.quaternion.vmult(new CANNON.Vec3(0, 0, -1));
-  const botVel = bot.chassisBody.velocity;
-  const botForwardSpeed = botFwd.x * botVel.x + botFwd.z * botVel.z;
+  // Steering (front wheels)
+  const currentSteer = bot.vehicleController.wheelSteering(0) || 0;
+  const smoothSteer = THREE.MathUtils.lerp(currentSteer, steerValue, 0.2);
+  bot.vehicleController.setWheelSteering(0, smoothSteer);
+  bot.vehicleController.setWheelSteering(1, smoothSteer);
+
+  // Engine force (rear wheels, RWD)
   const botMaxSpeed = 13;
-  if (dot > -0.3 && botForwardSpeed < botMaxSpeed) {
-    botVel.x += botFwd.x * 18 * dt;
-    botVel.z += botFwd.z * 18 * dt;
+  let force = 0;
+  if (dot > -0.3 && speed < botMaxSpeed) {
+    force = -MAX_ENGINE_FORCE * 0.6;
   } else if (dot <= -0.3) {
-    botVel.x -= botFwd.x * 10 * dt;
-    botVel.z -= botFwd.z * 10 * dt;
+    force = MAX_ENGINE_FORCE * 0.3;
   }
+  bot.vehicleController.setWheelEngineForce(2, force);
+  bot.vehicleController.setWheelEngineForce(3, force);
 
-  bot.vehicle.setSteeringValue(steerValue, 0);
-  bot.vehicle.setSteeringValue(steerValue, 1);
-  bot.vehicle.applyEngineForce(dot > -0.3 ? -80 : 80, 2);
-  bot.vehicle.applyEngineForce(dot > -0.3 ? -80 : 80, 3);
-
-
+  // Braking when going wrong direction
+  const brake = (dot <= -0.3 && speed > 3) ? 2.0 : 0;
+  for (let i = 0; i < 4; i++) bot.vehicleController.setWheelBrake(i, brake);
 
   if (speed > 3) {
     dustPool.emit(
@@ -1046,11 +1133,15 @@ function respawnBot(index) {
   const angle = Math.random() * Math.PI * 2;
   const dist = ARENA_SIZE * 0.7;
   const bot = botVehicles[index];
-  bot.chassisBody.position.set(Math.cos(angle) * dist, 2, Math.sin(angle) * dist);
-  bot.chassisBody.quaternion.setFromEuler(0, angle + Math.PI, 0);
-  bot.chassisBody.velocity.setZero();
-  bot.chassisBody.angularVelocity.setZero();
-  bot.chassisBody.wakeUp();
+
+  const spawnX = Math.cos(angle) * dist;
+  const spawnZ = Math.sin(angle) * dist;
+  bot.chassis.setTranslation({ x: spawnX, y: 2, z: spawnZ }, true);
+  const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, angle + Math.PI, 0));
+  bot.chassis.setRotation({ x: q.x, y: q.y, z: q.z, w: q.w }, true);
+  bot.chassis.setLinvel({ x: 0, y: 0, z: 0 }, true);
+  bot.chassis.setAngvel({ x: 0, y: 0, z: 0 }, true);
+  bot.chassis.wakeUp();
 
   botDamage[index] = 0;
   botWrecked[index] = false;
@@ -1070,36 +1161,43 @@ function respawnBot(index) {
 // ============================================================
 // COLLISION HANDLING
 // ============================================================
-function setupCollisions() {
-  world.addEventListener('beginContact', (event) => {
-    const { bodyA, bodyB } = event;
+function processCollisions() {
+  eventQueue.drainCollisionEvents((handle1, handle2, started) => {
+    if (!started) return;
 
-    // Calculate collision normal from body positions
-    const collisionNormal = new CANNON.Vec3();
-    bodyB.position.vsub(bodyA.position, collisionNormal);
-    collisionNormal.y = 0; // ignore vertical component
-    const dist = collisionNormal.length();
-    if (dist > 0) collisionNormal.scale(1 / dist, collisionNormal);
+    const c1 = world.getCollider(handle1);
+    const c2 = world.getCollider(handle2);
+    if (!c1 || !c2) return;
+    const b1 = c1.parent();
+    const b2 = c2.parent();
+    if (!b1 || !b2) return;
 
-    // Project relative velocity onto collision normal — this is the TRUE impact severity
-    const relVel = new CANNON.Vec3();
-    bodyA.velocity.vsub(bodyB.velocity, relVel);
-    const normalImpact = Math.abs(relVel.dot(collisionNormal));
+    // Calculate impact from velocity difference
+    const v1 = b1.linvel();
+    const v2 = b2.linvel();
+    const p1 = b1.translation();
+    const p2 = b2.translation();
 
-    // Thresholds based on normal impact speed (m/s)
-    // < 3: ignore (gentle brush, sliding along wall)
-    // 3-8: light bump (small sparks only)
-    // 8-15: solid hit (sparks, debris, light damage, sound)
-    // 15+: heavy crash (full effects, heavy damage, knockback)
+    // Collision normal from positions
+    let nx = p2.x - p1.x;
+    let nz = p2.z - p1.z;
+    const dist = Math.sqrt(nx * nx + nz * nz);
+    if (dist > 0) { nx /= dist; nz /= dist; }
+
+    // Project relative velocity onto collision normal
+    const relVelX = v1.x - v2.x;
+    const relVelZ = v1.z - v2.z;
+    const normalImpact = Math.abs(relVelX * nx + relVelZ * nz);
+
     if (normalImpact < 3) return;
 
     const intensity = Math.min((normalImpact - 3) / 20, 1);
     const contactPoint = new THREE.Vector3(
-      (bodyA.position.x + bodyB.position.x) / 2,
-      (bodyA.position.y + bodyB.position.y) / 2,
-      (bodyA.position.z + bodyB.position.z) / 2,
+      (p1.x + p2.x) / 2,
+      (p1.y + p2.y) / 2,
+      (p1.z + p2.z) / 2,
     );
-    const normal = new THREE.Vector3(collisionNormal.x, 0.5, collisionNormal.z).normalize();
+    const normal = new THREE.Vector3(nx, 0.5, nz).normalize();
 
     // Light bump — just a few sparks
     if (normalImpact < 8) {
@@ -1121,49 +1219,40 @@ function setupCollisions() {
       0.5 + Math.random() * 0.3, Math.floor(intensity * 8)
     );
 
-    // Damage — only from solid hits
-    if (bodyA === playerChassis || bodyB === playerChassis) {
+    // Determine which vehicles are involved
+    const h1 = c1.handle;
+    const h2 = c2.handle;
+    const v1info = colliderToVehicle.get(h1);
+    const v2info = colliderToVehicle.get(h2);
+
+    // Player damage
+    if ((v1info && v1info.type === 'player') || (v2info && v2info.type === 'player')) {
       cameraShakeIntensity = Math.max(cameraShakeIntensity, intensity * 1.2);
       playerDamage += normalImpact > DAMAGE_THRESHOLD_HEAVY ? 2 : 1;
       checkPlayerDamageState();
     }
 
-    for (let i = 0; i < botVehicles.length; i++) {
-      if (bodyA === botVehicles[i].chassisBody || bodyB === botVehicles[i].chassisBody) {
-        botDamage[i] += normalImpact > DAMAGE_THRESHOLD_HEAVY ? 2 : 1;
-        checkBotDamageState(i);
+    // Bot damage
+    for (const vinfo of [v1info, v2info]) {
+      if (vinfo && vinfo.type === 'bot') {
+        botDamage[vinfo.index] += normalImpact > DAMAGE_THRESHOLD_HEAVY ? 2 : 1;
+        checkBotDamageState(vinfo.index);
       }
     }
 
     // Knockback only on heavy crashes
     if (normalImpact > 12) {
       const knockForce = (normalImpact - 12) * 8;
-      if (bodyB.mass > 0) bodyB.applyImpulse(collisionNormal.scale(knockForce));
-      if (bodyA.mass > 0) bodyA.applyImpulse(collisionNormal.scale(-knockForce));
+      if (b2.isDynamic()) {
+        b2.applyImpulse({ x: nx * knockForce, y: 0, z: nz * knockForce }, true);
+      }
+      if (b1.isDynamic()) {
+        b1.applyImpulse({ x: -nx * knockForce, y: 0, z: -nz * knockForce }, true);
+      }
     }
 
     playCrashSound(intensity);
   });
-}
-
-// Anti-flip corrective torque
-function preventFlip(chassisBody) {
-  const up = new CANNON.Vec3(0, 1, 0);
-  const worldUp = chassisBody.quaternion.vmult(up);
-
-  // Always apply stabilizing torque — stronger the more tilted
-  const tiltAmount = 1 - worldUp.y; // 0 = upright, 1 = sideways
-  const stabilizeForce = 15 + tiltAmount * 30;
-  chassisBody.torque.x -= chassisBody.angularVelocity.x * stabilizeForce;
-  chassisBody.torque.z -= chassisBody.angularVelocity.z * stabilizeForce;
-  // Hard reset if fully flipped — extract yaw and rebuild quaternion
-  if (worldUp.y < 0.1) {
-    const q = chassisBody.quaternion;
-    const yaw = Math.atan2(2 * (q.w * q.y), 1 - 2 * q.y * q.y);
-    chassisBody.quaternion.setFromEuler(0, yaw, 0);
-    chassisBody.angularVelocity.set(0, chassisBody.angularVelocity.y * 0.5, 0);
-    chassisBody.position.y += 1.5;
-  }
 }
 
 function checkPlayerDamageState() {
@@ -1171,7 +1260,7 @@ function checkPlayerDamageState() {
     playerWrecked = true;
     playerRespawnTimer = RESPAWN_DELAY;
     document.getElementById('wrecked-overlay').classList.add('show');
-    const pos = playerChassis.position;
+    const pos = playerChassis.translation();
     firePool.emit({ x: pos.x, y: pos.y + 0.5, z: pos.z }, { x: 0, y: 5, z: 0 }, 1.0, 30);
     sparkPool.emit({ x: pos.x, y: pos.y + 0.5, z: pos.z }, { x: 0, y: 8, z: 0 }, 0.5, 40);
     cameraShakeIntensity = 2.0;
@@ -1194,23 +1283,23 @@ function checkBotDamageState(index) {
     score++;
     scoreEl.textContent = String(score);
 
-    const pos = bot.chassisBody.position;
+    const pos = bot.chassis.translation();
     firePool.emit({ x: pos.x, y: pos.y + 0.5, z: pos.z }, { x: 0, y: 5, z: 0 }, 1.0, 25);
     sparkPool.emit({ x: pos.x, y: pos.y + 0.5, z: pos.z }, { x: 0, y: 8, z: 0 }, 0.5, 30);
 
     if (bot.mesh) bot.mesh.visible = false;
-    bot.chassisBody.velocity.setZero();
-    bot.chassisBody.angularVelocity.setZero();
+    bot.chassis.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    bot.chassis.setAngvel({ x: 0, y: 0, z: 0 }, true);
     playCrashSound(1.0);
     cameraShakeIntensity = Math.max(cameraShakeIntensity, 0.5);
   }
 }
 
 function respawnPlayer() {
-  playerChassis.position.set(0, 2, 0);
-  playerChassis.quaternion.setFromEuler(0, 0, 0);
-  playerChassis.velocity.setZero();
-  playerChassis.angularVelocity.setZero();
+  playerChassis.setTranslation({ x: 0, y: 2, z: 0 }, true);
+  playerChassis.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true);
+  playerChassis.setLinvel({ x: 0, y: 0, z: 0 }, true);
+  playerChassis.setAngvel({ x: 0, y: 0, z: 0 }, true);
   playerChassis.wakeUp();
   playerDamage = 0;
   playerWrecked = false;
@@ -1340,7 +1429,7 @@ async function loadCarModel() {
     const scale = 4.2 / Math.max(size.x, size.z);
     carModel.scale.setScalar(scale);
     // Rotate model so its front faces -Z (matching physics forward direction)
-    // The Tripo model's front faces +X, so rotate +90° around Y
+    // The Tripo model's front faces +X, so rotate +90 around Y
     carModel.rotation.y = Math.PI / 2;
     // Recompute bounds after scaling + rotation, then center
     const box2 = new THREE.Box3().setFromObject(carModel);
@@ -1363,8 +1452,8 @@ let camAngle = 0;
 
 function updateCamera(dt) {
   if (!playerChassis) return;
-  const pos = playerChassis.position;
-  const worldForward = playerChassis.quaternion.vmult(new CANNON.Vec3(0, 0, -1));
+  const pos = playerChassis.translation();
+  const worldForward = getForwardDir(playerChassis);
   const targetAngle = Math.atan2(worldForward.x, worldForward.z);
 
   let angleDiff = targetAngle - camAngle;
@@ -1408,108 +1497,82 @@ function updatePlayer(dt) {
   if (playerWrecked) {
     playerRespawnTimer -= dt;
     if (playerRespawnTimer <= 0) respawnPlayer();
-    playerVehicle.applyEngineForce(0, 2);
-    playerVehicle.applyEngineForce(0, 3);
-    playerVehicle.setSteeringValue(0, 0);
-    playerVehicle.setSteeringValue(0, 1);
+    playerVehicleController.setWheelEngineForce(2, 0);
+    playerVehicleController.setWheelEngineForce(3, 0);
+    playerVehicleController.setWheelSteering(0, 0);
+    playerVehicleController.setWheelSteering(1, 0);
     return;
   }
 
-  const vel = playerChassis.velocity;
-  const speed = vel.length();
+  const vel = playerChassis.linvel();
+  const speed = Math.sqrt(vel.x * vel.x + vel.y * vel.y + vel.z * vel.z);
   const accelerating = keys['w'] || keys['arrowup'];
   const braking = keys['s'] || keys['arrowdown'];
   const steerLeft = keys['a'] || keys['arrowleft'];
   const steerRight = keys['d'] || keys['arrowright'];
   const boost = keys[' '];
 
-  // Car forward direction: RaycastVehicle negative engine force drives in -Z local,
-  // but the model faces +Z, so the actual movement forward is -Z in local space
-  const fwd = playerChassis.quaternion.vmult(new CANNON.Vec3(0, 0, -1));
+  // Forward direction
+  const fwd = getForwardDir(playerChassis);
   const forwardSpeed = fwd.x * vel.x + fwd.z * vel.z;
 
-  // Direct velocity control for arcade feel
-  const reverseMaxSpeed = MAX_SPEED * 0.4; // reverse is slower than forward
+  // Steering (front wheels 0,1)
+  const speedFactor = Math.max(0.3, 1 - speed / 50);
+  let steerInput = 0;
+  if (steerLeft) steerInput = 1;
+  if (steerRight) steerInput = -1;
+  const steerAngle = MAX_STEER * speedFactor * steerInput;
+  const currentSteer = playerVehicleController.wheelSteering(0) || 0;
+  const smoothSteer = THREE.MathUtils.lerp(currentSteer, steerAngle, 0.2);
+  playerVehicleController.setWheelSteering(0, smoothSteer);
+  playerVehicleController.setWheelSteering(1, smoothSteer);
 
-  if (accelerating && forwardSpeed < MAX_SPEED) {
-    vel.x += fwd.x * ACCELERATION * dt;
-    vel.z += fwd.z * ACCELERATION * dt;
-  }
+  // Engine force (rear wheels 2,3 for RWD)
+  // Car faces -Z, so negative engine force = forward
+  let force = 0;
+  if (accelerating) force = -MAX_ENGINE_FORCE;
   if (braking) {
     if (forwardSpeed > 1) {
-      // Braking
-      vel.x -= fwd.x * BRAKE_DECEL * dt;
-      vel.z -= fwd.z * BRAKE_DECEL * dt;
-    } else if (forwardSpeed > -reverseMaxSpeed) {
-      // Reverse — capped at reverseMaxSpeed
-      vel.x -= fwd.x * ACCELERATION * 0.4 * dt;
-      vel.z -= fwd.z * ACCELERATION * 0.4 * dt;
+      force = MAX_ENGINE_FORCE * 0.4;
+    } else {
+      force = MAX_ENGINE_FORCE * 0.4; // reverse
     }
   }
+  playerVehicleController.setWheelEngineForce(2, force);
+  playerVehicleController.setWheelEngineForce(3, force);
 
-  // Gradually align velocity with car heading — tire grip pulls car straight
-  // but allows bounces and slides to play out naturally
-  const right = playerChassis.quaternion.vmult(new CANNON.Vec3(1, 0, 0));
-  const lateralSpeed = right.x * vel.x + right.z * vel.z;
-  // Grip builds over time: ~3 per second decay rate — enough to prevent drifting
-  // but slow enough that wall bounces and collision physics feel natural
-  const gripRate = 1 - Math.pow(0.05, dt); // ~95% lateral killed per second, but gradual
-  vel.x -= right.x * lateralSpeed * gripRate;
-  vel.z -= right.z * lateralSpeed * gripRate;
-
-  // Natural deceleration when not pressing gas
-  if (!accelerating && !braking) {
-    vel.x *= Math.pow(0.6, dt);
-    vel.z *= Math.pow(0.6, dt);
-  }
-
-  // Minimal engine force — just enough for wheel spin visual, not enough to cause pitch torque
-  const visualForce = accelerating ? -80 : (braking ? 80 : 0);
-  playerVehicle.applyEngineForce(visualForce, 2);
-  playerVehicle.applyEngineForce(visualForce, 3);
-
-  // Steering — applied via torque for snappy arcade feel
-  const speedFactor = Math.max(0.3, 1 - speed / 50);
-  let steerValue = 0;
-  if (steerLeft) steerValue = MAX_STEER * speedFactor;
-  if (steerRight) steerValue = -MAX_STEER * speedFactor;
-  playerVehicle.setSteeringValue(steerValue, 0);
-  playerVehicle.setSteeringValue(steerValue, 1);
+  // Braking (all wheels)
+  const brakeForce = (braking && forwardSpeed > 1) ? 1.0 : 0;
+  for (let i = 0; i < 4; i++) playerVehicleController.setWheelBrake(i, brakeForce);
 
   // Boost
   boostCooldown = Math.max(0, boostCooldown - dt);
   if (boost && boostCooldown <= 0) {
-    vel.x += fwd.x * 20; // instant speed boost
-    vel.z += fwd.z * 20;
-    vel.y += 1.5; // slight hop
+    playerChassis.applyImpulse(
+      { x: fwd.x * BOOST_IMPULSE, y: 50, z: fwd.z * BOOST_IMPULSE },
+      true
+    );
     boostCooldown = BOOST_COOLDOWN;
     playBoostSound();
-    const pos = playerChassis.position;
+    const pos = playerChassis.translation();
     firePool.emit(
       { x: pos.x - fwd.x * 2, y: pos.y + 0.3, z: pos.z - fwd.z * 2 },
       { x: -fwd.x * 15, y: 2, z: -fwd.z * 15 }, 0.4, 15
     );
   }
 
-  // Clamp max speed (allow boost to exceed briefly)
-  const maxSpeedCap = MAX_SPEED * 2; // 40 m/s = 144 km/h hard cap
-  if (speed > maxSpeedCap) {
-    const scale = maxSpeedCap / speed;
-    vel.x *= scale;
-    vel.z *= scale;
-  }
-
   // Tire screech
-  if (Math.abs(steerValue) > 0.3 && speed > 10) {
-    playScreechSound(Math.abs(steerValue) * speed / 30);
+  if (Math.abs(smoothSteer) > 0.3 && speed > 10) {
+    playScreechSound(Math.abs(smoothSteer) * speed / 30);
   } else {
     stopScreechSound();
   }
 
   // Dust
+  const pos = playerChassis.translation();
   if (speed > 5) {
     dustPool.emit(
-      { x: playerChassis.position.x, y: 0.2, z: playerChassis.position.z },
+      { x: pos.x, y: 0.2, z: pos.z },
       { x: (Math.random() - 0.5) * 3, y: 1 + Math.random() * 2, z: (Math.random() - 0.5) * 3 },
       0.8 + Math.random() * 0.5, Math.floor(speed / 10)
     );
@@ -1518,13 +1581,13 @@ function updatePlayer(dt) {
   // Damage smoke/fire
   if (playerDamage >= 10 && playerDamage < 20) {
     smokePool.emit(
-      { x: playerChassis.position.x, y: playerChassis.position.y + 0.8, z: playerChassis.position.z },
+      { x: pos.x, y: pos.y + 0.8, z: pos.z },
       { x: (Math.random() - 0.5), y: 2 + Math.random(), z: (Math.random() - 0.5) }, 1.0, 1
     );
   }
   if (playerDamage >= 20) {
     firePool.emit(
-      { x: playerChassis.position.x, y: playerChassis.position.y + 0.5, z: playerChassis.position.z },
+      { x: pos.x, y: pos.y + 0.5, z: pos.z },
       { x: (Math.random() - 0.5), y: 3 + Math.random(), z: (Math.random() - 0.5) }, 0.6, 2
     );
     if (playerMesh) {
@@ -1549,43 +1612,53 @@ function updatePlayer(dt) {
 // ============================================================
 // SYNC VISUALS
 // ============================================================
-function syncMeshes() {
-  if (playerMesh && playerChassis) {
-    playerMesh.position.copy(playerChassis.position);
-    playerMesh.quaternion.copy(playerChassis.quaternion);
+function syncVehicleVisuals(chassis, vehicleController, mesh, wheelMeshes) {
+  if (!chassis) return;
+  const pos = chassis.translation();
+  const rot = chassis.rotation();
+
+  if (mesh) {
+    mesh.position.set(pos.x, pos.y, pos.z);
+    mesh.quaternion.set(rot.x, rot.y, rot.z, rot.w);
   }
 
-  if (playerVehicle) {
-    for (let i = 0; i < 4; i++) {
-      playerVehicle.updateWheelTransform(i);
-      const t = playerVehicle.wheelInfos[i].worldTransform;
-      if (playerVehicle.wheelMeshes && playerVehicle.wheelMeshes[i]) {
-        playerVehicle.wheelMeshes[i].position.copy(t.position);
-        playerVehicle.wheelMeshes[i].quaternion.copy(t.quaternion);
-      }
-    }
+  // Wheel visual sync
+  for (let i = 0; i < 4; i++) {
+    if (!wheelMeshes[i]) continue;
+    const conn = vehicleController.wheelChassisConnectionPointCs(i);
+    const susLen = vehicleController.wheelSuspensionLength(i);
+    const steering = vehicleController.wheelSteering(i);
+    const rotation = vehicleController.wheelRotation(i);
+
+    // Position wheel relative to chassis in world space
+    const chassisQ = new THREE.Quaternion(rot.x, rot.y, rot.z, rot.w);
+    const localPos = new THREE.Vector3(conn.x, conn.y - (susLen != null ? susLen : 0.3), conn.z);
+    localPos.applyQuaternion(chassisQ);
+
+    wheelMeshes[i].position.set(pos.x + localPos.x, pos.y + localPos.y, pos.z + localPos.z);
+
+    // Combine chassis rotation + steering + spin
+    const steerQ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), steering);
+    const spinQ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(-1, 0, 0), rotation);
+    const wheelLocalQ = new THREE.Quaternion().multiplyQuaternions(steerQ, spinQ);
+    wheelMeshes[i].quaternion.multiplyQuaternions(chassisQ, wheelLocalQ);
   }
+}
+
+function syncMeshes() {
+  syncVehicleVisuals(playerChassis, playerVehicleController, playerMesh, playerWheelMeshes);
 
   for (let i = 0; i < botVehicles.length; i++) {
     const bot = botVehicles[i];
-    if (bot.mesh) {
-      bot.mesh.position.copy(bot.chassisBody.position);
-      bot.mesh.quaternion.copy(bot.chassisBody.quaternion);
-    }
-    for (let j = 0; j < 4; j++) {
-      bot.vehicle.updateWheelTransform(j);
-      const t = bot.vehicle.wheelInfos[j].worldTransform;
-      if (bot.wheelMeshes[j]) {
-        bot.wheelMeshes[j].position.copy(t.position);
-        bot.wheelMeshes[j].quaternion.copy(t.quaternion);
-      }
-    }
+    syncVehicleVisuals(bot.chassis, bot.vehicleController, bot.mesh, bot.wheelMeshes);
   }
 
   arenaProps.forEach(prop => {
-    if (prop.mesh) {
-      prop.mesh.position.copy(prop.body.position);
-      prop.mesh.quaternion.copy(prop.body.quaternion);
+    if (prop.mesh && prop.body) {
+      const pos = prop.body.translation();
+      const rot = prop.body.rotation();
+      prop.mesh.position.set(pos.x, pos.y, pos.z);
+      prop.mesh.quaternion.set(rot.x, rot.y, rot.z, rot.w);
     }
   });
 }
@@ -1593,7 +1666,7 @@ function syncMeshes() {
 function updateBotEffects() {
   for (let i = 0; i < botVehicles.length; i++) {
     if (botWrecked[i]) continue;
-    const pos = botVehicles[i].chassisBody.position;
+    const pos = botVehicles[i].chassis.translation();
     if (botDamage[i] >= 4 && botDamage[i] < 8) {
       smokePool.emit({ x: pos.x, y: pos.y + 0.8, z: pos.z },
         { x: (Math.random() - 0.5), y: 2, z: (Math.random() - 0.5) }, 0.8, 1);
@@ -1611,13 +1684,18 @@ function updateBotEffects() {
 function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.05);
-  const time = clock.elapsedTime; // read property directly, avoid double-consuming getDelta
+  const time = clock.elapsedTime;
 
-  world.step(1 / 60, dt, 3);
+  // Update all vehicle controllers before stepping
+  playerVehicleController.updateVehicle(dt);
+  for (let i = 0; i < botVehicles.length; i++) {
+    botVehicles[i].vehicleController.updateVehicle(dt);
+  }
 
-  // Anti-flip for all vehicles
-  preventFlip(playerChassis);
-  for (let i = 0; i < botVehicles.length; i++) preventFlip(botVehicles[i].chassisBody);
+  world.step(eventQueue);
+
+  // Process collision events
+  processCollisions();
 
   updatePlayer(dt);
   for (let i = 0; i < NUM_BOTS; i++) updateBot(i, dt);
@@ -1650,11 +1728,11 @@ async function init() {
   initScene();
   loadBar.style.width = '10%';
 
-  const materials = initPhysics();
+  await initPhysics();
   loadBar.style.width = '20%';
 
   createSky();
-  createArena(materials.wallMat);
+  createArena();
   loadBar.style.width = '30%';
 
   createStadium();
@@ -1668,11 +1746,12 @@ async function init() {
   loadBar.style.width = '70%';
 
   // Player
-  const playerData = createVehicle(new CANNON.Vec3(0, 2, 0), materials.carMat);
-  playerVehicle = playerData.vehicle;
-  playerChassis = playerData.chassisBody;
-  playerVehicle.wheelMeshes = playerData.wheelMeshes;
+  const playerData = createVehicle(0, 2, 0);
+  playerVehicleController = playerData.vehicleController;
+  playerChassis = playerData.chassis;
+  playerWheelMeshes = playerData.wheelMeshes;
   playerMesh = createCarMesh(0xff2200);
+  colliderToVehicle.set(playerData.chassisCollider.handle, { type: 'player' });
   loadBar.style.width = '80%';
 
   // Bots
@@ -1680,20 +1759,20 @@ async function init() {
   for (let i = 0; i < NUM_BOTS; i++) {
     const angle = (i / NUM_BOTS) * Math.PI * 2;
     const dist = ARENA_SIZE * 0.7;
-    const botData = createVehicle(
-      new CANNON.Vec3(Math.cos(angle) * dist, 2, Math.sin(angle) * dist),
-      materials.carMat
-    );
-    botData.chassisBody.quaternion.setFromEuler(0, angle + Math.PI, 0);
+    const bx = Math.cos(angle) * dist;
+    const bz = Math.sin(angle) * dist;
+    const botData = createVehicle(bx, 2, bz);
+    const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, angle + Math.PI, 0));
+    botData.chassis.setRotation({ x: q.x, y: q.y, z: q.z, w: q.w }, true);
     botData.mesh = createCarMesh(botColors[i]);
     botVehicles.push(botData);
     botDamage.push(0);
     botWrecked.push(false);
     botRespawnTimers.push(0);
+    colliderToVehicle.set(botData.chassisCollider.handle, { type: 'bot', index: i });
   }
   loadBar.style.width = '90%';
 
-  setupCollisions();
   loadBar.style.width = '100%';
 
   setTimeout(() => {
@@ -1704,7 +1783,7 @@ async function init() {
   setTimeout(() => { document.getElementById('controls-hint').style.opacity = '0'; }, 8000);
 
   // Debug access (remove for production)
-  window._debug = { playerChassis, playerVehicle, keys, botVehicles };
+  window._debug = { playerChassis, playerVehicleController, keys, botVehicles };
 
   animate();
 }
