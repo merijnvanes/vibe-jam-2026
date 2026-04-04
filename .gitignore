@@ -1,5 +1,7 @@
 .playwright-mcp/
 .DS_Store
+.env
+node_modules/
 *.zip
 autotile-*.png
 map-seed-*.png

@@ -936,6 +936,8 @@ function loadAllNPCs() {
     // Skeleton patrol near southern ruins
     loadNPC('Skeleton_Minion.glb', -12, 10.5, 0.5, 'Idle_B'),
     loadNPC('Skeleton_Minion.glb', -13.5, 9.5, -0.8, 'Idle'),
+    // AI-generated wizard (Tripo AI) — near spawn campfire, walking
+    loadNPC('Wizard_Tripo.glb', 4, -4, Math.PI * 0.5, 'NlaTrack.001', 2.2),
   ]);
 }
 
