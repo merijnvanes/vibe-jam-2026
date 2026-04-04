@@ -1026,6 +1026,7 @@ function updateBot(index, dt) {
     return;
   }
 
+  bot.chassis.wakeUp();
   const pos = bot.chassis.translation();
   const vel = bot.chassis.linvel();
   const speed = Math.sqrt(vel.x * vel.x + vel.z * vel.z);
@@ -1526,6 +1527,11 @@ function updatePlayer(dt) {
   const steerLeft = keys['a'] || keys['arrowleft'];
   const steerRight = keys['d'] || keys['arrowright'];
   const boost = keys[' '];
+
+  // Wake up sleeping body when any input is pressed
+  if (accelerating || braking || steerLeft || steerRight || boost) {
+    playerChassis.wakeUp();
+  }
 
   // Forward direction
   const fwd = getForwardDir(playerChassis);
